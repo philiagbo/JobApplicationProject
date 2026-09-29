@@ -85,16 +85,48 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Pending |
+| DATA-04 | Phase 1 | Pending |
+| DATA-05 | Phase 1 | Pending |
+| DATA-06 | Phase 1 | Pending |
+| SCORE-01 | Phase 1 | Pending |
+| SCORE-02 | Phase 1 | Pending |
+| SCORE-03 | Phase 1 | Pending |
+| SCORE-04 | Phase 1 | Pending |
+| SRC-01 | Phase 1 | Pending |
+| SRC-02 | Phase 1 | Pending |
+| SRC-03 | Phase 2 | Pending |
+| WATCH-01 | Phase 2 | Pending |
+| WATCH-02 | Phase 2 | Pending |
+| PROF-01 | Phase 3 | Pending |
+| PROF-02 | Phase 3 | Pending |
+| PROF-03 | Phase 3 | Pending |
+| PROF-04 | Phase 3 | Pending |
+| PROF-05 | Phase 3 | Pending |
+| GMAIL-01 | Phase 4 | Pending |
+| GMAIL-02 | Phase 4 | Pending |
+| DETAIL-01 | Phase 4 | Pending |
+| DETAIL-02 | Phase 4 | Pending |
+| FILL-01 | Phase 5 | Pending |
+| FILL-02 | Phase 5 | Pending |
+| FILL-03 | Phase 5 | Pending |
+| FILL-04 | Phase 5 | Pending |
+| FILL-05 | Phase 5 | Pending |
+| FILL-06 | Phase 5 | Pending |
+| QUEUE-01 | Phase 6 | Pending |
+| QUEUE-02 | Phase 6 | Pending |
+| QUEUE-03 | Phase 6 | Pending |
+| QUEUE-04 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 33 total
-- Mapped to phases: 0
-- Unmapped: 33 ⚠️
+- v1 requirements: 34 total
+- Mapped to phases: 34
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-29*
-*Last updated: 2026-09-29 after initial definition*
+*Last updated: 2026-09-29 after roadmap creation (v1 total corrected from 33 to 34)*
