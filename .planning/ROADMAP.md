@@ -32,7 +32,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. `POST /api/jobs/<id>/dismiss`, `/queue` and `/undo` change a job's status and record `status_changed_at`, and `GET /api/stats` returns weekly found/queued/applied/dismissed counts with a per-source breakdown
   5. `GET` then `PUT /api/settings` round-trips career fields, excluded words, minimum salary, location, API keys and poll intervals, and any API error returns an `{"error": ...}` body with a 4xx/5xx status, never 200
   6. `python test_core.py` passes, covering the salary regex, score ordering, pros/cons and excluded words
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Tracer: settings to Remotive fetch to scored, deduplicated jobs in SQLite to ranked GET /api/jobs, plus settings/fetch errors and offline tests (wave 1)
+- [ ] 01-02-PLAN.md — Full summarize (salary, type, remote, years, bullets) and score rules with pros/cons; api/test_core.py (wave 2)
+- [ ] 01-03-PLAN.md — Dismiss/queue/undo, ?status filter, weekly stats, re-score on settings save, JSON errors everywhere, local-only guard (wave 2)
 
 ### Phase 2: Watcher and More Sources
 **Goal**: The job feed refreshes itself in the background from Remotive, Reed and Adzuna
@@ -99,7 +104,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data, Scoring and First Source | 0/TBD | Not started | - |
+| 1. Data, Scoring and First Source | 0/3 | Planned | - |
 | 2. Watcher and More Sources | 0/TBD | Not started | - |
 | 3. Profile and Answers | 0/TBD | Not started | - |
 | 4. Gmail Alerts and Job Details | 0/TBD | Not started | - |
