@@ -156,6 +156,73 @@ def test_remotive_spacing():
         sources.REMOTIVE_GAP_SECONDS = 0
 
 
+def seeded():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst", "python"]})
+    c.post("/api/fetch")
+    return c, {j["title"]: j["id"] for j in c.get("/api/jobs").get_json()}
+
+
+def sql(query, *args):
+    with db.connect() as conn:
+        conn.execute(query, args)
+
+
+def status_changed(job_id):
+    with db.connect() as conn:
+        return conn.execute("SELECT status_changed_at FROM jobs WHERE id = ?", (job_id,)).fetchone()[0]
+
+
+def test_dismiss_and_undo():
+    c, ids = seeded()
+    i = ids["Data Analyst"]
+    sql("UPDATE jobs SET status_changed_at = datetime('now', '-1 day') WHERE id = ?", i)
+    old = status_changed(i)
+    r = c.post("/api/jobs/%d/dismiss" % i)
+    assert r.status_code == 200 and r.get_json()["status"] == "dismissed"
+    assert status_changed(i) > old
+    assert i not in [j["id"] for j in c.get("/api/jobs").get_json()]
+    assert i in [j["id"] for j in c.get("/api/jobs?status=dismissed").get_json()]
+    sql("UPDATE jobs SET status_changed_at = datetime('now', '-1 day') WHERE id = ?", i)
+    old = status_changed(i)
+    r = c.post("/api/jobs/%d/undo" % i)
+    assert r.get_json()["status"] == "new" and status_changed(i) > old
+
+
+def test_queue_and_undo():
+    c, ids = seeded()
+    i = ids["Data Analyst"]
+    assert c.post("/api/jobs/%d/queue" % i).get_json()["status"] == "queued"
+    assert c.post("/api/jobs/%d/undo" % i).get_json()["status"] == "new"
+
+
+def test_invalid_transitions_409():
+    c, ids = seeded()
+    i, k = ids["Data Analyst"], ids["Office Manager"]
+    c.post("/api/jobs/%d/queue" % i)
+    r = c.post("/api/jobs/%d/dismiss" % i)
+    assert r.status_code == 409 and "error" in r.get_json()
+    sql("UPDATE jobs SET status = 'applied' WHERE id = ?", k)
+    for action in ("dismiss", "queue", "undo"):
+        assert c.post("/api/jobs/%d/%s" % (k, action)).status_code == 409
+
+
+def test_unknown_job_404():
+    c = fresh_client()
+    for action in ("dismiss", "queue", "undo"):
+        r = c.post("/api/jobs/999999/" + action)
+        assert r.status_code == 404 and r.get_json() == {"error": "Job not found"}
+
+
+def test_status_filter():
+    c, ids = seeded()
+    assert c.get("/api/jobs?status=bogus").status_code == 400
+    for t in ("Data Analyst", "Office Manager", "Backend Engineer"):
+        c.post("/api/jobs/%d/queue" % ids[t])
+    scores = [j["score"] for j in c.get("/api/jobs?status=queued").get_json()]
+    assert len(scores) == 3 and scores == sorted(scores, reverse=True)
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:

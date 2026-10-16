@@ -64,7 +64,20 @@ def fetch_now():
 
 @app.get("/api/jobs")
 def jobs_list():
-    return jsonify(db.list_jobs(get_db(), "new"))
+    status = request.args.get("status", "new")
+    if status not in db.STATUSES:
+        return jsonify(error="Unknown status: %s" % status), 400
+    return jsonify(db.list_jobs(get_db(), status))
+
+
+@app.post("/api/jobs/<int:job_id>/<any(dismiss, queue, undo):action>")
+def job_action(job_id, action):
+    try:
+        return jsonify(db.set_status(get_db(), job_id, action))
+    except KeyError:
+        return jsonify(error="Job not found"), 404
+    except ValueError as e:
+        return jsonify(error=str(e)), 409
 
 
 # Serve the built React app; unknown paths fall back to index.html so client-side routes work.

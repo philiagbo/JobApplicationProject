@@ -142,3 +142,27 @@ def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
 def list_jobs(conn, status: str = "new") -> List[dict]:
     rows = conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY score DESC, id DESC", (status,))
     return [job_dict(r) for r in rows]
+
+
+STATUSES = ("new", "dismissed", "queued", "filling", "ready", "needs_input", "applied", "skipped")
+TRANSITIONS = {
+    "dismiss": (("new",), "dismissed"),
+    "queue": (("new",), "queued"),
+    "undo": (("dismissed", "queued"), "new"),
+}
+
+
+def set_status(conn, job_id: int, action: str) -> dict:
+    allowed, to = TRANSITIONS[action]
+    with conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = ?, status_changed_at = datetime('now') WHERE id = ? AND status IN (%s)"
+            % ",".join("?" * len(allowed)),
+            (to, job_id) + allowed,
+        )
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise KeyError(job_id)
+    if cur.rowcount != 1:
+        raise ValueError("Cannot %s a job that is %s" % (action, row["status"]))
+    return job_dict(row)
