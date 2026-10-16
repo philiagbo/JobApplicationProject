@@ -9,24 +9,24 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 ### Data & Jobs API
 
-- [ ] **DATA-01**: SQLite schema is created on startup with `jobs`, `answers`, `unanswered` and `settings` tables
-- [ ] **DATA-02**: `GET /api/jobs` returns jobs sorted by score, highest first
-- [ ] **DATA-03**: `POST /api/jobs/<id>/dismiss`, `/queue` and `/undo` change a job's status and record `status_changed_at`
-- [ ] **DATA-04**: `GET` and `PUT /api/settings` read and save career fields, excluded words, minimum salary, location, API keys and poll intervals
-- [ ] **DATA-05**: `GET /api/stats` returns weekly counts of jobs found, queued, applied and dismissed, with per-source breakdown
-- [ ] **DATA-06**: API errors return an `{"error": ...}` body with a 4xx/5xx status, never 200
+- [x] **DATA-01**: SQLite schema is created on startup with `jobs`, `answers`, `unanswered` and `settings` tables
+- [x] **DATA-02**: `GET /api/jobs` returns jobs sorted by score, highest first
+- [x] **DATA-03**: `POST /api/jobs/<id>/dismiss`, `/queue` and `/undo` change a job's status and record `status_changed_at`
+- [x] **DATA-04**: `GET` and `PUT /api/settings` read and save career fields, excluded words, minimum salary, location, API keys and poll intervals
+- [x] **DATA-05**: `GET /api/stats` returns weekly counts of jobs found, queued, applied and dismissed, with per-source breakdown
+- [x] **DATA-06**: API errors return an `{"error": ...}` body with a 4xx/5xx status, never 200
 
 ### Scoring
 
-- [ ] **SCORE-01**: `normalise` turns a question or label into a stable lookup key
-- [ ] **SCORE-02**: `score(job, settings, profile)` returns a score plus pros and cons from rules (salary vs minimum, remote, CV skills matched, title matches a field, excluded words, experience gap)
-- [ ] **SCORE-03**: `summarize` extracts salary, type, remote status, years of experience and up to 3 "what you'd do" and 3 "what they want" bullets
-- [ ] **SCORE-04**: `python test_core.py` covers the salary regex, score ordering, pros/cons and excluded words
+- [x] **SCORE-01**: `normalise` turns a question or label into a stable lookup key
+- [x] **SCORE-02**: `score(job, settings, profile)` returns a score plus pros and cons from rules (salary vs minimum, remote, CV skills matched, title matches a field, excluded words, experience gap)
+- [x] **SCORE-03**: `summarize` extracts salary, type, remote status, years of experience and up to 3 "what you'd do" and 3 "what they want" bullets
+- [x] **SCORE-04**: `python test_core.py` covers the salary regex, score ordering, pros/cons and excluded words
 
 ### Sources & Watcher
 
-- [ ] **SRC-01**: `fetch_remotive` returns jobs with no API key
-- [ ] **SRC-02**: New jobs are inserted deduplicated by URL and scored on insert
+- [x] **SRC-01**: `fetch_remotive` returns jobs with no API key
+- [x] **SRC-02**: New jobs are inserted deduplicated by URL and scored on insert
 - [ ] **SRC-03**: `fetch_reed` and `fetch_adzuna` (country `gb`) return jobs using the keys saved in settings
 - [ ] **WATCH-01**: A watcher thread polls the APIs on the configured interval and keeps running after a source fails
 - [ ] **WATCH-02**: Poll intervals (Gmail 5 min, APIs 60 min by default) are read from settings
@@ -87,18 +87,18 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
-| DATA-04 | Phase 1 | Pending |
-| DATA-05 | Phase 1 | Pending |
-| DATA-06 | Phase 1 | Pending |
-| SCORE-01 | Phase 1 | Pending |
-| SCORE-02 | Phase 1 | Pending |
-| SCORE-03 | Phase 1 | Pending |
-| SCORE-04 | Phase 1 | Pending |
-| SRC-01 | Phase 1 | Pending |
-| SRC-02 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
+| DATA-04 | Phase 1 | Complete |
+| DATA-05 | Phase 1 | Complete |
+| DATA-06 | Phase 1 | Complete |
+| SCORE-01 | Phase 1 | Complete |
+| SCORE-02 | Phase 1 | Complete |
+| SCORE-03 | Phase 1 | Complete |
+| SCORE-04 | Phase 1 | Complete |
+| SRC-01 | Phase 1 | Complete |
+| SRC-02 | Phase 1 | Complete |
 | SRC-03 | Phase 2 | Pending |
 | WATCH-01 | Phase 2 | Pending |
 | WATCH-02 | Phase 2 | Pending |

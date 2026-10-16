@@ -12,7 +12,7 @@ Job Helper is built API-first and bottom-up: pure logic and data before threads,
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data, Scoring and First Source** - SQLite schema, jobs/settings/stats API, rule-based scoring and Remotive, so real ranked jobs show up through the API
+- [x] **Phase 1: Data, Scoring and First Source** - SQLite schema, jobs/settings/stats API, rule-based scoring and Remotive, so real ranked jobs show up through the API (completed 2026-10-16)
 - [ ] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive, Reed and Adzuna on configurable intervals
 - [ ] **Phase 3: Profile and Answers** - CV upload extraction, saved answers with matching, and cover letter template
 - [ ] **Phase 4: Gmail Alerts and Job Details** - LinkedIn, Indeed, CV-Library and Totaljobs alerts via Gmail, plus full job descriptions
@@ -22,6 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Data, Scoring and First Source
+
 **Goal**: Real, ranked jobs from Remotive are stored locally and visible through the API, with settings, stats and clear errors
 **Depends on**: Nothing (first phase)
 **Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, SCORE-01, SCORE-02, SCORE-03, SCORE-04, SRC-01, SRC-02
@@ -32,14 +33,16 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. `POST /api/jobs/<id>/dismiss`, `/queue` and `/undo` change a job's status and record `status_changed_at`, and `GET /api/stats` returns weekly found/queued/applied/dismissed counts with a per-source breakdown
   5. `GET` then `PUT /api/settings` round-trips career fields, excluded words, minimum salary, location, API keys and poll intervals, and any API error returns an `{"error": ...}` body with a 4xx/5xx status, never 200
   6. `python test_core.py` passes, covering the salary regex, score ordering, pros/cons and excluded words
-**Plans:** 3 plans
+
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 01-01-PLAN.md — Tracer: settings to Remotive fetch to scored, deduplicated jobs in SQLite to ranked GET /api/jobs, plus settings/fetch errors and offline tests (wave 1)
-- [ ] 01-02-PLAN.md — Full summarize (salary, type, remote, years, bullets) and score rules with pros/cons; api/test_core.py (wave 2)
-- [ ] 01-03-PLAN.md — Dismiss/queue/undo, ?status filter, weekly stats, re-score on settings save, JSON errors everywhere, local-only guard (wave 2)
+- [x] 01-01-PLAN.md — Tracer: settings to Remotive fetch to scored, deduplicated jobs in SQLite to ranked GET /api/jobs, plus settings/fetch errors and offline tests (wave 1)
+- [x] 01-02-PLAN.md — Full summarize (salary, type, remote, years, bullets) and score rules with pros/cons; api/test_core.py (wave 2)
+- [x] 01-03-PLAN.md — Dismiss/queue/undo, ?status filter, weekly stats, re-score on settings save, JSON errors everywhere, local-only guard (wave 2)
 
 ### Phase 2: Watcher and More Sources
+
 **Goal**: The job feed refreshes itself in the background from Remotive, Reed and Adzuna
 **Depends on**: Phase 1
 **Requirements**: SRC-03, WATCH-01, WATCH-02
@@ -48,9 +51,11 @@ Plans:
   2. With the app running and nothing triggering a fetch, new jobs appear in the API on the configured poll interval
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
+
 **Plans**: TBD
 
 ### Phase 3: Profile and Answers
+
 **Goal**: The person's profile and saved answers exist and can be matched to application form questions
 **Depends on**: Phase 1
 **Requirements**: PROF-01, PROF-02, PROF-03, PROF-04, PROF-05
@@ -60,9 +65,11 @@ Plans:
   3. `find_answer` returns the saved answer for a label by exact match, then fuzzy match (similarity 0.85 or higher), and maps it onto the matching dropdown or radio option
   4. An answer that mentions the company name or is longer than 300 characters is not saved
   5. `cover_letter` returns an editable template filled from the profile and the job
+
 **Plans**: TBD
 
 ### Phase 4: Gmail Alerts and Job Details
+
 **Goal**: Jobs from boards with no public API arrive via Gmail alerts, and any job can show its full description
 **Depends on**: Phase 2 (watcher), Phase 3 (skills for scoring alert jobs)
 **Requirements**: GMAIL-01, GMAIL-02, DETAIL-01, DETAIL-02
@@ -71,9 +78,11 @@ Plans:
   2. LinkedIn, Indeed, CV-Library and Totaljobs alerts each have their own parser, and each parser's test passes against a saved sample email
   3. `fetch_details` returns the full description from the page's JSON-LD `JobPosting` block, or the largest text block when there is none
   4. When a page is blocked, it is retried once in Playwright and then marked "open listing to read", and no CAPTCHA is ever attempted
+
 **Plans**: TBD
 
 ### Phase 5: Autofill Worker
+
 **Goal**: Queued jobs get their application forms filled from the profile and saved answers, ready for the person to review and submit
 **Depends on**: Phase 3 (profile, answers, cover letter), Phase 4 (job details, Playwright retry)
 **Requirements**: FILL-01, FILL-02, FILL-03, FILL-04, FILL-05, FILL-06
@@ -84,9 +93,11 @@ Plans:
   4. Up to 5 applications fill at once, each in its own tab, and the cap is a setting
   5. When the person clicks Submit, the app detects it, the job becomes `applied` and the typed answers are captured; the app never clicks Submit itself
   6. On linkedin.com and indeed.com the app opens the page and shows copy-paste answers instead of filling
+
 **Plans**: TBD
 
 ### Phase 6: Apply Queue API
+
 **Goal**: The person can manage the Apply queue and resolve unanswered questions through the API
 **Depends on**: Phase 5
 **Requirements**: QUEUE-01, QUEUE-02, QUEUE-03, QUEUE-04
@@ -95,6 +106,7 @@ Plans:
   2. The API lists unique unanswered questions across the queue, most frequently seen first
   3. Answering a question saves it and fills it into every open form that asks it
   4. Skipping a job drops it from the queue
+
 **Plans**: TBD
 
 ## Progress
@@ -104,7 +116,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data, Scoring and First Source | 0/3 | Planned | - |
+| 1. Data, Scoring and First Source | 3/3 | Complete    | 2026-10-16 |
 | 2. Watcher and More Sources | 0/TBD | Not started | - |
 | 3. Profile and Answers | 0/TBD | Not started | - |
 | 4. Gmail Alerts and Job Details | 0/TBD | Not started | - |
