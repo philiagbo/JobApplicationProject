@@ -4,6 +4,8 @@ import sys
 import tempfile
 import time
 
+from flask.testing import FlaskClient
+
 os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -12,6 +14,20 @@ import db  # noqa: E402
 import sources  # noqa: E402
 
 sources.REMOTIVE_GAP_SECONDS = 0
+
+
+class CheckedClient(FlaskClient):
+    """Every test checks that failing /api responses carry a JSON error."""
+
+    def open(self, *args, **kwargs):
+        resp = super().open(*args, **kwargs)
+        if resp.request.path.startswith("/api/") and resp.status_code >= 400:
+            body = resp.get_json(silent=True)
+            assert isinstance(body, dict) and "error" in body, (resp.request.path, resp.status_code)
+        return resp
+
+
+app.app.test_client_class = CheckedClient
 
 SUMMARY_KEYS = {"salary_text", "salary_annual", "currency", "job_type", "remote",
                 "years_experience", "what_youd_do", "what_they_want"}
@@ -267,6 +283,44 @@ def test_excluded_words_never_hide():
     c, _ = seeded()
     c.put("/api/settings", json={"excluded_words": ["analyst"]})
     assert "Data Analyst" in [j["title"] for j in c.get("/api/jobs").get_json()]
+
+
+def test_unknown_routes_json():
+    c = fresh_client()
+    assert c.get("/api/nope").status_code == 404
+    assert c.post("/api/nope").status_code == 405
+
+
+def test_non_json_settings_body_400():
+    c = fresh_client()
+    r = c.put("/api/settings", data="x", content_type="text/plain")
+    assert r.status_code == 400 and "error" in r.get_json()
+
+
+def test_crash_is_500_without_details():
+    c = fresh_client()
+    real = db.list_jobs
+
+    def boom(conn, status="new"):
+        raise RuntimeError("boom")
+
+    app.app.logger.disabled = True  # keep the expected traceback out of test output
+    try:
+        db.list_jobs = boom
+        r = c.get("/api/jobs")
+    finally:
+        db.list_jobs = real
+        app.app.logger.disabled = False
+    assert r.status_code == 500 and r.get_json() == {"error": "Internal server error"}
+    assert b"boom" not in r.data and b"Traceback" not in r.data
+
+
+def test_local_only_guard():
+    c = fresh_client()
+    assert c.get("/api/settings", base_url="http://evil.example").status_code == 403
+    assert c.get("/api/settings", headers={"Origin": "https://evil.example"}).status_code == 403
+    assert c.get("/api/settings", headers={"Origin": "http://localhost:5173"}).status_code == 200
+    assert c.get("/api/settings").status_code == 200
 
 
 if __name__ == "__main__":
