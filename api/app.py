@@ -47,7 +47,14 @@ def settings_put():
         db.save_settings(conn, request.get_json(silent=True))
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    return jsonify(db.get_settings(conn))
+    settings = db.get_settings(conn)
+    db.rescore_new(conn, settings)
+    return jsonify(settings)
+
+
+@app.get("/api/stats")
+def stats_get():
+    return jsonify(db.stats(get_db()))
 
 
 @app.post("/api/fetch")

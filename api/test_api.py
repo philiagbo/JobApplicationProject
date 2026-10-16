@@ -223,6 +223,52 @@ def test_status_filter():
     assert len(scores) == 3 and scores == sorted(scores, reverse=True)
 
 
+def empty_metric():
+    return {"total": 0, "by_source": {}}
+
+
+def test_stats_found_window():
+    c, ids = seeded()
+    assert c.get("/api/stats").get_json()["found"] == {"total": 4, "by_source": {"remotive": 4}}
+    sql("UPDATE jobs SET created_at = datetime('now', '-8 days') WHERE id = ?", ids["Data Analyst"])
+    s = c.get("/api/stats").get_json()
+    assert s["days"] == 7 and s["found"] == {"total": 3, "by_source": {"remotive": 3}}
+    for k in ("queued", "dismissed", "applied"):
+        assert s[k] == empty_metric()
+
+
+def test_stats_status_counts():
+    c, ids = seeded()
+    c.post("/api/jobs/%d/queue" % ids["Data Analyst"])
+    c.post("/api/jobs/%d/dismiss" % ids["Office Manager"])
+    sql("UPDATE jobs SET status = 'applied' WHERE id = ?", ids["Backend Engineer"])
+    one = {"total": 1, "by_source": {"remotive": 1}}
+    s = c.get("/api/stats").get_json()
+    assert s["queued"] == one and s["dismissed"] == one and s["applied"] == one
+    sql("UPDATE jobs SET status_changed_at = datetime('now', '-8 days') WHERE id = ?", ids["Office Manager"])
+    assert c.get("/api/stats").get_json()["dismissed"] == empty_metric()
+
+
+def test_settings_save_rescores_new_only():
+    c, ids = seeded()
+    c.post("/api/jobs/%d/queue" % ids["Data Analyst"])
+
+    def scores():
+        return {j["title"]: j["score"] for s in ("new", "queued") for j in c.get("/api/jobs?status=" + s).get_json()}
+
+    before = scores()
+    c.put("/api/settings", json={"career_fields": ["office manager"]})
+    after = scores()
+    assert after["Office Manager"] > before["Office Manager"]
+    assert after["Data Analyst"] == before["Data Analyst"]
+
+
+def test_excluded_words_never_hide():
+    c, _ = seeded()
+    c.put("/api/settings", json={"excluded_words": ["analyst"]})
+    assert "Data Analyst" in [j["title"] for j in c.get("/api/jobs").get_json()]
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:

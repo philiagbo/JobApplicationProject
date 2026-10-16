@@ -144,6 +144,31 @@ def list_jobs(conn, status: str = "new") -> List[dict]:
     return [job_dict(r) for r in rows]
 
 
+def stats(conn) -> dict:
+    # ponytail: counts use current status, so a queued job that later moves on stops counting as queued;
+    # an events table would track history if the dashboard needs it.
+    def metric(where, column):
+        rows = conn.execute(
+            "SELECT source, COUNT(*) FROM jobs WHERE %s AND %s >= datetime('now', '-7 days') GROUP BY source"
+            % (where, column)
+        )
+        by_source = {r[0]: r[1] for r in rows}
+        return {"total": sum(by_source.values()), "by_source": by_source}
+
+    out = {"days": 7, "found": metric("1", "created_at")}
+    for status in ("queued", "dismissed", "applied"):
+        out[status] = metric("status = '%s'" % status, "status_changed_at")
+    return out
+
+
+def rescore_new(conn, settings: dict) -> None:
+    with conn:
+        for row in conn.execute("SELECT * FROM jobs WHERE status = 'new'").fetchall():
+            total, pros, cons = core.score(job_dict(row), settings)
+            conn.execute("UPDATE jobs SET score = ?, pros = ?, cons = ? WHERE id = ?",
+                         (total, json.dumps(pros), json.dumps(cons), row["id"]))
+
+
 STATUSES = ("new", "dismissed", "queued", "filling", "ready", "needs_input", "applied", "skipped")
 TRANSITIONS = {
     "dismiss": (("new",), "dismissed"),
