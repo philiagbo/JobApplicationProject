@@ -43,15 +43,21 @@ def settings_get():
 @app.put("/api/settings")
 def settings_put():
     conn = get_db()
-    db.save_settings(conn, request.get_json(silent=True))
+    try:
+        db.save_settings(conn, request.get_json(silent=True))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     return jsonify(db.get_settings(conn))
 
 
 @app.post("/api/fetch")
 def fetch_now():
     conn = get_db()
+    settings = db.get_settings(conn)
+    if not settings["career_fields"]:
+        return jsonify(error="Choose at least one career field in settings"), 400
     try:
-        return jsonify(run_fetch(conn, db.get_settings(conn)))
+        return jsonify(run_fetch(conn, settings))
     except sources.SourceError as e:
         return jsonify(error=str(e)), 502
 

@@ -84,7 +84,31 @@ def get_settings(conn) -> dict:
     return out
 
 
+def _clean(key, value):
+    default = DEFAULTS[key]
+    if isinstance(default, list):
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ValueError("%s must be a list of strings" % key)
+        return [v.strip() for v in value if v.strip()]
+    if isinstance(default, int):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError("%s must be a whole number" % key)
+        floor = 0 if key == "min_salary" else 1 if key.endswith("_poll_minutes") else None
+        if floor is not None and value < floor:
+            raise ValueError("%s must be at least %d" % (key, floor))
+        return value
+    if not isinstance(value, str):
+        raise ValueError("%s must be text" % key)
+    return value
+
+
 def save_settings(conn, changes) -> None:
+    if not isinstance(changes, dict):
+        raise ValueError("Settings must be a JSON object")
+    for key in changes:
+        if key not in DEFAULTS:
+            raise ValueError("Unknown setting: %s" % key)
+    changes = {k: _clean(k, v) for k, v in changes.items()}
     with conn:
         for key, value in changes.items():
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value)))
