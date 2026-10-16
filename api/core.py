@@ -169,11 +169,37 @@ def summarize(job: dict) -> dict:
     }
 
 
+SALARY_ABOVE_POINTS = 30
+REMOTE_POINTS = 10
+HYBRID_POINTS = 5
+EXCLUDED_POINTS = 25
+
+
+def k(n: float) -> str:
+    return "£" + format(n / 1000, ".3g") + "k"
+
+
 def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[int, List[str], List[str]]:
-    # profile is accepted and ignored (D-05).
+    # profile is accepted and ignored: skills/experience rules wait for Phase 3 (D-05).
     pros = []  # type: List[str]
     cons = []  # type: List[str]
     total = BASE_SCORE
+    summary = job.get("summary") or summarize(job)
+
+    # Salary is the heaviest rule (D-02); only GBP is comparable (D-10).
+    annual, floor = summary.get("salary_annual"), settings.get("min_salary") or 0
+    if annual is None:
+        cons.append("Salary not listed")
+    elif floor > 0:
+        if summary.get("currency") != "GBP":
+            cons.append("Pays %s, can't compare with your %s minimum (not in £)" % (summary.get("salary_text"), k(floor)))
+        elif annual >= floor:
+            total += SALARY_ABOVE_POINTS
+            pros.append("Pays %s, %s your %s minimum" % (k(annual), "meets" if annual == floor else "above", k(floor)))
+        else:
+            total -= 15 + round(30 * min((floor - annual) / floor / 0.5, 1))
+            cons.append("Pays %s, below your %s minimum" % (k(annual), k(floor)))
+
     title_tokens = set(normalise(job.get("title", "")).split())
     for field in settings.get("career_fields", []):
         tokens = normalise(field).split()
@@ -181,4 +207,20 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
             total += TITLE_POINTS
             pros.append("Title matches your field '%s'" % field)
             break
-    return max(0, min(100, total)), pros, cons
+
+    if summary.get("remote") == "Remote":
+        total += REMOTE_POINTS
+        pros.append("Fully remote")
+    elif summary.get("remote") == "Hybrid":
+        total += HYBRID_POINTS
+        pros.append("Hybrid working")
+
+    # Excluded words cost points but never hide the job (D-04); one penalty however many hit.
+    haystack = " %s %s " % (normalise(job.get("title", "")), normalise(" ".join(_text_lines(job.get("description") or ""))))
+    hits = [w for w in settings.get("excluded_words", []) if normalise(w) and " %s " % normalise(w) in haystack]
+    for w in hits:
+        cons.append("Mentions excluded word '%s'" % w)
+    if hits:
+        total -= EXCLUDED_POINTS
+
+    return max(0, min(100, int(total))), pros, cons

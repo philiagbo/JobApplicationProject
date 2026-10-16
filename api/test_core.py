@@ -119,6 +119,114 @@ def test_adversarial_description_is_fast():
     assert s["salary_annual"] is None and s["years_experience"] is None
 
 
+# --- score -----------------------------------------------------------------
+
+SETTINGS = {"career_fields": ["Data Analyst"], "excluded_words": [], "min_salary": 40000}
+
+
+def job(title="Analyst", salary="", description="", **extra):
+    j = {"title": title, "salary": salary, "description": description, "location": ""}
+    j.update(extra)
+    j["summary"] = core.summarize(j)
+    return j
+
+
+def sc(j, **overrides):
+    s = dict(SETTINGS)
+    s.update(overrides)
+    return core.score(j, s)
+
+
+def test_score_salary_above_min():
+    n, pros, cons = sc(job(salary="£45,000"))
+    assert n == 80
+    assert pros == ["Pays £45k, above your £40k minimum"] and cons == []
+
+
+def test_score_salary_meets_min():
+    n, pros, _ = sc(job(salary="£40,000"))
+    assert n == 80 and pros == ["Pays £40k, meets your £40k minimum"]
+    assert core.k(42500) == "£42.5k"
+
+
+def test_score_title_match_and_salary_not_listed():
+    n, pros, cons = sc(job(title="Senior Data Analyst"))
+    assert n == 65
+    assert pros == ["Title matches your field 'Data Analyst'"] and cons == ["Salary not listed"]
+
+
+def test_score_neutral_is_base():
+    n, pros, cons = sc(job())
+    assert n == 50 and pros == [] and cons == ["Salary not listed"]
+
+
+def test_score_ordering():
+    above = sc(job(salary="£45,000"))[0]
+    title_only = sc(job(title="Data Analyst"))[0]
+    neutral = sc(job())[0]
+    assert above > title_only > neutral
+    excl = sc(job(title="Senior Analyst", salary="£45,000"), excluded_words=["senior"])[0]
+    assert excl == 55 and excl > neutral
+
+
+def test_score_below_min_is_scaled():
+    n38, _, cons38 = sc(job(salary="£38,000"))
+    n15, _, cons15 = sc(job(salary="£15,000"))
+    assert n15 < n38 < 50
+    assert cons38 == ["Pays £38k, below your £40k minimum"]
+    assert cons15 == ["Pays £15k, below your £40k minimum"]
+
+
+def test_score_other_currency_not_compared():
+    n, pros, cons = sc(job(salary="USD 80000"))
+    assert n == 50 and pros == []
+    assert cons == ["Pays USD 80000, can't compare with your £40k minimum (not in £)"]
+
+
+def test_score_min_salary_zero_ignores_salary():
+    n, pros, cons = sc(job(salary="£45,000"), min_salary=0)
+    assert n == 50 and pros == [] and cons == []
+
+
+def test_score_remote_points():
+    n, pros, _ = sc(job(remote="Remote"))
+    assert n == 60 and "Fully remote" in pros
+    n, pros, _ = sc(job(remote="Hybrid"))
+    assert n == 55 and "Hybrid working" in pros
+    n, pros, _ = sc(job(remote="On-site"))
+    assert n == 50 and pros == []
+
+
+def test_score_excluded_word_penalty_keeps_job():
+    base = sc(job(title="Analyst"))[0]
+    res = sc(job(title="Senior Analyst"), excluded_words=["senior"])
+    assert isinstance(res, tuple) and res[0] == 25 == base - 25
+    assert "Mentions excluded word 'senior'" in res[2]
+
+
+def test_score_excluded_word_boundaries():
+    assert sc(job(description="a seniority ladder"), excluded_words=["senior"])[0] == 50
+    n, _, cons = sc(job(description="needs security clearance"), excluded_words=["security clearance"])
+    assert n == 25 and "Mentions excluded word 'security clearance'" in cons
+
+
+def test_score_two_excluded_words_one_penalty():
+    n, _, cons = sc(job(title="Senior Lead Analyst"), excluded_words=["senior", "lead"])
+    assert n == 25
+    assert [c for c in cons if c.startswith("Mentions")] == [
+        "Mentions excluded word 'senior'", "Mentions excluded word 'lead'"]
+
+
+def test_score_clamped():
+    assert sc(job(title="Data Analyst", salary="£100,000", remote="Remote"))[0] == 100
+    assert sc(job(salary="£10,000", title="Senior Analyst"), excluded_words=["senior"])[0] == 0
+
+
+def test_score_profile_ignored():
+    j = job(title="Data Analyst", salary="£45,000")
+    assert core.score(j, SETTINGS, {"skills": ["sql"], "years": 1}) == core.score(j, SETTINGS, None)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
