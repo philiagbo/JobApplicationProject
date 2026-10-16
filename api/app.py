@@ -1,14 +1,45 @@
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, g, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 import db
 import sources
 
 STATIC = Path(__file__).parent / "static"
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 app = Flask(__name__, static_folder=None)
 db.init_db()
+
+
+@app.before_request
+def local_only():
+    # Blocks DNS rebinding and cross-site requests: the API returns keys and can trigger fetches.
+    if not request.path.startswith("/api/"):
+        return None
+    host = urlsplit("//" + request.host).hostname
+    origin = request.headers.get("Origin")
+    if host not in LOCAL_HOSTS or (origin is not None and urlsplit(origin).hostname not in LOCAL_HOSTS):
+        return jsonify(error="Forbidden: local requests only"), 403
+    return None
+
+
+@app.errorhandler(HTTPException)
+def api_http_error(e):
+    if request.path.startswith("/api/"):
+        return jsonify(error=e.name), e.code
+    return e
+
+
+@app.errorhandler(Exception)
+def api_unhandled_error(e):
+    app.logger.exception("Unhandled error")
+    if request.path.startswith("/api/"):
+        return jsonify(error="Internal server error"), 500
+    return "Internal server error", 500
 
 
 def get_db():
@@ -47,7 +78,14 @@ def settings_put():
         db.save_settings(conn, request.get_json(silent=True))
     except ValueError as e:
         return jsonify(error=str(e)), 400
-    return jsonify(db.get_settings(conn))
+    settings = db.get_settings(conn)
+    db.rescore_new(conn, settings)
+    return jsonify(settings)
+
+
+@app.get("/api/stats")
+def stats_get():
+    return jsonify(db.stats(get_db()))
 
 
 @app.post("/api/fetch")
@@ -64,7 +102,20 @@ def fetch_now():
 
 @app.get("/api/jobs")
 def jobs_list():
-    return jsonify(db.list_jobs(get_db(), "new"))
+    status = request.args.get("status", "new")
+    if status not in db.STATUSES:
+        return jsonify(error="Unknown status: %s" % status), 400
+    return jsonify(db.list_jobs(get_db(), status))
+
+
+@app.post("/api/jobs/<int:job_id>/<any(dismiss, queue, undo):action>")
+def job_action(job_id, action):
+    try:
+        return jsonify(db.set_status(get_db(), job_id, action))
+    except KeyError:
+        return jsonify(error="Job not found"), 404
+    except ValueError as e:
+        return jsonify(error=str(e)), 409
 
 
 # Serve the built React app; unknown paths fall back to index.html so client-side routes work.
@@ -81,4 +132,4 @@ def ui(path):
 
 
 if __name__ == "__main__":
-    app.run(port=8765, debug=True)
+    app.run(host="127.0.0.1", port=8765, debug=os.environ.get("JOBHELPER_DEBUG") == "1")

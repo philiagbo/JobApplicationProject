@@ -142,3 +142,52 @@ def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
 def list_jobs(conn, status: str = "new") -> List[dict]:
     rows = conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY score DESC, id DESC", (status,))
     return [job_dict(r) for r in rows]
+
+
+def stats(conn) -> dict:
+    # ponytail: counts use current status, so a queued job that later moves on stops counting as queued;
+    # an events table would track history if the dashboard needs it.
+    def metric(where, column):
+        rows = conn.execute(
+            "SELECT source, COUNT(*) FROM jobs WHERE %s AND %s >= datetime('now', '-7 days') GROUP BY source"
+            % (where, column)
+        )
+        by_source = {r[0]: r[1] for r in rows}
+        return {"total": sum(by_source.values()), "by_source": by_source}
+
+    out = {"days": 7, "found": metric("1", "created_at")}
+    for status in ("queued", "dismissed", "applied"):
+        out[status] = metric("status = '%s'" % status, "status_changed_at")
+    return out
+
+
+def rescore_new(conn, settings: dict) -> None:
+    with conn:
+        for row in conn.execute("SELECT * FROM jobs WHERE status = 'new'").fetchall():
+            total, pros, cons = core.score(job_dict(row), settings)
+            conn.execute("UPDATE jobs SET score = ?, pros = ?, cons = ? WHERE id = ?",
+                         (total, json.dumps(pros), json.dumps(cons), row["id"]))
+
+
+STATUSES = ("new", "dismissed", "queued", "filling", "ready", "needs_input", "applied", "skipped")
+TRANSITIONS = {
+    "dismiss": (("new",), "dismissed"),
+    "queue": (("new",), "queued"),
+    "undo": (("dismissed", "queued"), "new"),
+}
+
+
+def set_status(conn, job_id: int, action: str) -> dict:
+    allowed, to = TRANSITIONS[action]
+    with conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = ?, status_changed_at = datetime('now') WHERE id = ? AND status IN (%s)"
+            % ",".join("?" * len(allowed)),
+            (to, job_id) + allowed,
+        )
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise KeyError(job_id)
+    if cur.rowcount != 1:
+        raise ValueError("Cannot %s a job that is %s" % (action, row["status"]))
+    return job_dict(row)
