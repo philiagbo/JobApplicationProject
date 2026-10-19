@@ -113,6 +113,7 @@ A local web app, built for someone else to run on their Windows PC, that finds a
 
 ## Code Style
 
+- Ponytail style: stdlib before deps, no unrequested abstractions, shortest working diff, mark deliberate shortcuts with `# ponytail:` comments.
 - No Prettier config present; formatting is implicit
 - Two spaces for CSS properties
 - No trailing semicolons in JSX but present in TypeScript
