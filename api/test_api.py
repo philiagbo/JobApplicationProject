@@ -366,6 +366,78 @@ def test_rejected_settings_save_does_not_wake():
     assert not watcher.WAKE.is_set()
 
 
+def test_watcher_status_endpoint_empty():
+    c = fresh_client()
+    r = c.get("/api/watcher")
+    assert r.status_code == 200
+    assert r.get_json() == {"running": False, "fetching": False, "sources": {}}
+    assert c.get("/api/watcher", headers={"Origin": "https://evil.example"}).status_code == 403
+
+
+def test_fetch_reed_jobs_scored_and_deduped():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst"], "reed_api_key": "k"})
+    r = c.post("/api/fetch")
+    assert r.status_code == 200
+    assert r.get_json() == {"new": 5, "by_source": {"reed": 2, "remotive": 3}, "errors": {}}
+    reed = [j for j in c.get("/api/jobs").get_json() if j["source"] == "reed"]
+    assert len(reed) == 2
+    for j in reed:
+        assert isinstance(j["pros"], list) and isinstance(j["summary"], dict)
+    assert sorted(j["summary"]["salary_annual"] or 0 for j in reed) == [0, 55000]
+    r = c.post("/api/fetch")
+    assert r.get_json()["by_source"] == {"reed": 0, "remotive": 0}
+
+
+def test_fetch_partial_failure_is_200():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst"], "reed_api_key": "SECRET-REED-KEY"})
+    FAIL.add("reed.co.uk")
+    r = c.post("/api/fetch")
+    body = r.get_json()
+    assert r.status_code == 200 and body["new"] == 3 and body["by_source"] == {"remotive": 3}
+    assert body["errors"]["reed"].startswith("Reed fetch failed")
+    w = c.get("/api/watcher")
+    srcs = w.get_json()["sources"]
+    assert srcs["reed"]["ok"] is False and srcs["reed"]["error"].startswith("Reed fetch failed")
+    assert srcs["remotive"]["ok"] is True and srcs["remotive"]["new"] == 3
+    assert b"SECRET-REED-KEY" not in r.data and b"SECRET-REED-KEY" not in w.data
+
+
+def test_fetch_all_sources_failed_is_502():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst"], "reed_api_key": "k"})
+    FAIL.update({"reed.co.uk", "remotive.com"})
+    r = c.post("/api/fetch")
+    body = r.get_json()
+    assert r.status_code == 502 and body["error"].startswith("Reed fetch failed")
+    assert set(body["errors"]) == {"reed", "remotive"}
+    assert count_jobs() == 0
+
+
+def test_fetch_busy_is_409():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst"], "reed_api_key": "k"})
+    watcher.FETCH_LOCK.acquire()
+    try:
+        r = c.post("/api/fetch")
+        assert r.status_code == 409 and r.get_json() == {"error": "Fetch already running"}
+        assert calls == []
+    finally:
+        watcher.FETCH_LOCK.release()
+    assert c.post("/api/fetch").status_code == 200
+
+
+def test_fetch_skips_reed_without_key():
+    c = fresh_client()
+    c.put("/api/settings", json={"career_fields": ["data analyst"]})
+    r = c.post("/api/fetch")
+    body = r.get_json()
+    assert r.status_code == 200 and set(body["by_source"]) == {"remotive"} and body["errors"] == {}
+    assert not [x for x in calls if x.startswith("reed:")]
+    assert set(c.get("/api/watcher").get_json()["sources"]) == {"remotive"}
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:
