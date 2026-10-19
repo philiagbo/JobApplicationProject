@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Watcher and More Sources
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-10-19T22:38:57.016Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-10-19T22:40:54.207Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 02 execution started
-state_head: ffc4c2f19ccb494c5690ece9eae1d773723dbf96
+state_head: ee7f4a0133acf272c9530b0f6bbadbe50c94f65a
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 5
+  completed_plans: 6
   percent: 17
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 02 (Watcher and More Sources) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 02 execution started
 
@@ -58,6 +58,7 @@ Progress: [██░░░░░░░░] 17%
 |------|----------|-------|-------|
 | Phase 02 P01 | 15 min | 2 tasks | 5 files |
 | Phase 02 P02 | 10 min | 2 tasks | 4 files |
+| Phase 02 P03 | 6 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Recent decisions affecting current work:
 - [Roadmap]: API-first, bottom-up build order (pure logic, then threads, then Playwright); UI (v2) is not in this roadmap
 - [Phase 02]: Watcher tick returns None when FETCH_LOCK is busy so it polls after the manual fetch; watcher starts only from __main__ (WERKZEUG_RUN_MAIN guard)
 - [Phase 02]: Adzuna redirect_url stored as bare scheme://host/path for UNIQUE url dedupe; predicted salary stored empty
+- [Phase 02]: 02-03: PUT /api/settings wakes the watcher only for reed_api_key, adzuna_app_id, adzuna_app_key, career_fields, computed from request keys
+- [Phase 02]: 02-03: GET /api/watcher returns in-memory watcher.status() only, never settings, so keys cannot leak
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T22:38:56.989Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-10-19T22:40:54.179Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
