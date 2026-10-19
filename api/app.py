@@ -104,6 +104,12 @@ def fetch_now():
     return jsonify(result)
 
 
+@app.get("/api/watcher")
+def watcher_status():
+    # in-memory status only: never reads settings, so it cannot return a saved key
+    return jsonify(watcher.status())
+
+
 @app.get("/api/jobs")
 def jobs_list():
     status = request.args.get("status", "new")
