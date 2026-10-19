@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 03
-current_phase_name: profile-and-answers
+current_phase: 02
+current_phase_name: Watcher and More Sources
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-10-19T21:48:45.975Z"
-last_activity: 2026-10-16
-last_activity_desc: Phase 1 complete, transitioned to Phase 2
-state_head: a1bccc5f3c76cd9c1f0f9b132004072d82ef150f
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-10-19T22:36:21.298Z"
+last_activity: 2026-10-19
+last_activity_desc: Phase 02 execution started
+state_head: 79a84606d437d097e6dbb92d467800a5406c1a79
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 3
+  completed_plans: 4
   percent: 17
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Surface well-ranked jobs and pre-fill applications so the person only reviews and submits. The app never clicks Submit.
-**Current focus:** Phase 01 — Data, Scoring and First Source
+**Current focus:** Phase 02 — Watcher and More Sources
 
 ## Current Position
 
-Phase: 03 (profile-and-answers) — READY TO EXECUTE
-Plan: Not started
+Phase: 02 (Watcher and More Sources) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-10-16 — Phase 1 complete, transitioned to Phase 2
+Last activity: 2026-10-19 — Phase 02 execution started
 
 Progress: [██░░░░░░░░] 17%
 
@@ -52,6 +52,11 @@ Progress: [██░░░░░░░░] 17%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 02 P01 | 15 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -61,6 +66,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - [Roadmap]: API-first, bottom-up build order (pure logic, then threads, then Playwright); UI (v2) is not in this roadmap
+- [Phase 02]: Watcher tick returns None when FETCH_LOCK is busy so it polls after the manual fetch; watcher starts only from __main__ (WERKZEUG_RUN_MAIN guard)
 
 ### Pending Todos
 
@@ -82,6 +88,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T21:13:10.516Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-profile-and-answers/03-CONTEXT.md
+Last session: 2026-10-19T22:36:21.273Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None

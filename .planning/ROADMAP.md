@@ -52,11 +52,11 @@ Plans:
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
 
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 02-01-PLAN.md — Tracer: saved Reed key to watcher thread startup poll to scored Reed jobs in GET /api/jobs; shared run_fetch + lock for POST /api/fetch; watcher behaviour tests (wave 1)
+- [x] 02-01-PLAN.md — Tracer: saved Reed key to watcher thread startup poll to scored Reed jobs in GET /api/jobs; shared run_fetch + lock for POST /api/fetch; watcher behaviour tests (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-02-PLAN.md — Adzuna (gb) adapter with URL canonicalisation and predicted-salary drop, wired into the watcher; COVERAGE.md for Reed and Adzuna (wave 2)
@@ -139,7 +139,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data, Scoring and First Source | 3/3 | Complete    | 2026-10-16 |
-| 2. Watcher and More Sources | 0/TBD | Not started | - |
+| 2. Watcher and More Sources | 1/4 | In Progress|  |
 | 3. Profile and Answers | 0/TBD | Not started | - |
 | 4. Gmail Alerts and Job Details | 0/TBD | Not started | - |
 | 5. Autofill Worker | 0/TBD | Not started | - |
