@@ -345,6 +345,27 @@ def test_local_only_guard():
     assert c.get("/api/settings").status_code == 200
 
 
+def test_settings_save_wakes_watcher():
+    c = fresh_client()
+    for body in ({"min_salary": 1}, {"api_poll_minutes": 5}, {"gmail_poll_minutes": 10},
+                 {"location": "Leeds"}, {"excluded_words": ["x"]}):
+        assert c.put("/api/settings", json=body).status_code == 200, body
+        assert not watcher.WAKE.is_set(), body
+    for body in ({"reed_api_key": "x"}, {"career_fields": ["python"]}, {"adzuna_app_id": "a"},
+                 {"adzuna_app_key": "b"}, {"min_salary": 2, "career_fields": ["sql"]}):
+        watcher.WAKE.clear()
+        assert c.put("/api/settings", json=body).status_code == 200, body
+        assert watcher.WAKE.is_set(), body
+
+
+def test_rejected_settings_save_does_not_wake():
+    c = fresh_client()
+    assert c.put("/api/settings", json={"career_fields": "data"}).status_code == 400
+    assert not watcher.WAKE.is_set()
+    assert c.put("/api/settings", data="x", content_type="text/plain").status_code == 400
+    assert not watcher.WAKE.is_set()
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:
