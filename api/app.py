@@ -6,7 +6,7 @@ from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 import db
-import sources
+import watcher
 
 STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -55,12 +55,6 @@ def close_db(_exc):
         conn.close()
 
 
-def run_fetch(conn, settings):
-    jobs = sources.fetch_remotive(settings["career_fields"])
-    counts = {"remotive": db.insert_jobs(conn, jobs, settings)}
-    return {"new": sum(counts.values()), "by_source": counts}
-
-
 @app.get("/api/health")
 def health():
     return jsonify(ok=True)
@@ -94,10 +88,15 @@ def fetch_now():
     settings = db.get_settings(conn)
     if not settings["career_fields"]:
         return jsonify(error="Choose at least one career field in settings"), 400
+    if not watcher.FETCH_LOCK.acquire(blocking=False):
+        return jsonify(error="Fetch already running"), 409
     try:
-        return jsonify(run_fetch(conn, settings))
-    except sources.SourceError as e:
-        return jsonify(error=str(e)), 502
+        result = watcher.run_fetch(conn, settings)
+    finally:
+        watcher.FETCH_LOCK.release()
+    if result["errors"] and not result["by_source"]:
+        return jsonify(error=next(iter(result["errors"].values())), errors=result["errors"]), 502
+    return jsonify(result)
 
 
 @app.get("/api/jobs")
@@ -132,4 +131,8 @@ def ui(path):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8765, debug=os.environ.get("JOBHELPER_DEBUG") == "1")
+    debug = os.environ.get("JOBHELPER_DEBUG") == "1"
+    # the debug reloader runs this file twice; only the child (WERKZEUG_RUN_MAIN) starts the watcher
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        watcher.start()
+    app.run(host="127.0.0.1", port=8765, debug=debug)

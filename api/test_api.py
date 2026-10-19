@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app  # noqa: E402
 import db  # noqa: E402
 import sources  # noqa: E402
+import watcher  # noqa: E402
 
 sources.REMOTIVE_GAP_SECONDS = 0
 
@@ -46,12 +47,30 @@ CANNED = {
     "python": [SHARED, item("py-2", "Backend Engineer", job_type="contract")],
 }
 
+REED_CANNED = {
+    "data analyst": [
+        {"jobId": 1, "jobUrl": "https://www.reed.co.uk/jobs/data-analyst/1", "jobTitle": "Data Analyst",
+         "employerName": "Reed Co ", "locationName": "London", "minimumSalary": 50000, "maximumSalary": 60000,
+         "jobDescription": "analyse data"},
+        {"jobId": 2, "jobUrl": "https://www.reed.co.uk/jobs/analyst-2/2", "jobTitle": "Analyst",
+         "employerName": "Other Co", "locationName": "Leeds", "jobDescription": "no salary shown"},
+    ],
+}
+
 calls = []
+FAIL = set()  # URL substrings that raise OSError
 
 
-def fake_get_json(url, params):
-    calls.append(params["search"])
-    return {"jobs": CANNED[params["search"]]}
+def fake_get_json(url, params, headers=None):
+    if any(f in url for f in FAIL):
+        raise OSError("down")
+    if "remotive.com" in url:
+        calls.append(params["search"])
+        return {"jobs": CANNED[params["search"]]}
+    if "reed.co.uk" in url:
+        calls.append("reed:" + params["keywords"])
+        return {"results": REED_CANNED[params["keywords"]]}
+    raise AssertionError(url)
 
 
 sources.get_json = fake_get_json
@@ -61,6 +80,9 @@ def fresh_client():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
     del calls[:]
+    FAIL.clear()
+    watcher.STATUS.clear()
+    watcher.WAKE.clear()
     return app.app.test_client()
 
 
@@ -122,7 +144,7 @@ def test_fetch_dedupes():
     r = c.post("/api/fetch")
     assert r.status_code == 200
     assert len(calls) == 2
-    assert r.get_json() == {"new": 4, "by_source": {"remotive": 4}}
+    assert r.get_json() == {"new": 4, "by_source": {"remotive": 4}, "errors": {}}
     r = c.post("/api/fetch")
     assert r.get_json()["new"] == 0
     assert count_jobs() == 4
@@ -147,14 +169,14 @@ def test_fetch_source_failure_is_502():
     c.put("/api/settings", json={"career_fields": ["python"]})
     real = sources.get_json
 
-    def boom(url, params):
+    def boom(url, params, headers=None):
         raise OSError("down")
 
     try:
         sources.get_json = boom
         r = c.post("/api/fetch")
         assert r.status_code == 502 and "Remotive" in r.get_json()["error"]
-        sources.get_json = lambda url, params: {"oops": []}
+        sources.get_json = lambda url, params, headers=None: {"oops": []}
         r = c.post("/api/fetch")
         assert r.status_code == 502 and "Remotive" in r.get_json()["error"]
     finally:
