@@ -10,6 +10,8 @@ import watcher
 
 STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+# Saving any of these makes the watcher poll now; interval keys are re-read every tick instead.
+WAKE_KEYS = frozenset({"reed_api_key", "adzuna_app_id", "adzuna_app_key", "career_fields"})
 
 app = Flask(__name__, static_folder=None)
 db.init_db()
@@ -68,10 +70,13 @@ def settings_get():
 @app.put("/api/settings")
 def settings_put():
     conn = get_db()
+    body = request.get_json(silent=True)
     try:
-        db.save_settings(conn, request.get_json(silent=True))
+        db.save_settings(conn, body)
     except ValueError as e:
         return jsonify(error=str(e)), 400
+    if WAKE_KEYS & body.keys():
+        watcher.WAKE.set()
     settings = db.get_settings(conn)
     db.rescore_new(conn, settings)
     return jsonify(settings)
