@@ -52,7 +52,18 @@ Plans:
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
 
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 02-01-PLAN.md — Tracer: saved Reed key to watcher thread startup poll to scored Reed jobs in GET /api/jobs; shared run_fetch + lock for POST /api/fetch; watcher behaviour tests (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 02-02-PLAN.md — Adzuna (gb) adapter with URL canonicalisation and predicted-salary drop, wired into the watcher; COVERAGE.md for Reed and Adzuna (wave 2)
+- [ ] 02-03-PLAN.md — Settings save wakes the watcher, GET /api/watcher status, manual fetch contract tests (409 / 200 with errors / 502) (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 02-04-PLAN.md — Real-process check plus human verification with real Reed and Adzuna keys (wave 3, checkpoint)
 
 ### Phase 3: Profile and Answers
 
