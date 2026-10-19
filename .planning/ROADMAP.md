@@ -77,7 +77,18 @@ Plans:
   4. An answer that mentions the company name or is longer than 300 characters is not saved
   5. `cover_letter` returns an editable template filled from the profile and the job
 
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 03-01-PLAN.md — Package-legitimacy checkpoint (blocking-human), then pin and install pypdf and python-docx (wave 1, checkpoint)
+- [ ] 03-02-PLAN.md — Tracer: POST /api/answers to find_answer mapping a differently worded visa label onto a Yes/No option; matching and blocking rules; answers CRUD, seeding and unanswered clearing (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 03-03-PLAN.md — Profile and CV upload: api/cv.py, extract_profile (name, email, phone, LinkedIn, skills), GET/PUT /api/profile, POST /api/profile/cv validation, api/data/ gitignored (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 03-04-PLAN.md — Cover letter (template file, setting, GET /api/jobs/<id>/cover-letter) plus the capped skills scoring rule and profile-change re-score (wave 3)
 
 ### Phase 4: Gmail Alerts and Job Details
 

@@ -52,6 +52,24 @@ Filled in by the planner/executor per task. Requirement → test mapping (from R
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
+### Task-level map (from the plans)
+
+| Task | Plan | Wave | Requirement / Decision | Automated Command | Status |
+|------|------|------|------------------------|-------------------|--------|
+| 03-01 T1 | 01 | 1 | package gate (T-03-SC) | blocking-human checkpoint, no command | ⬜ pending |
+| 03-01 T2 | 01 | 1 | PROF-01 deps | `.venv/bin/python -c "import pypdf, docx"` + test_core + test_api | ⬜ pending |
+| 03-02 T1 (tracer) | 02 | 1 | PROF-02/03/04 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-02 T2 | 02 | 1 | PROF-03, PROF-04, D-10..D-12 | `.venv/bin/python api/test_core.py` | ⬜ pending |
+| 03-02 T3 | 02 | 1 | PROF-02, D-05, D-13, D-14 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-03 T1 (tracer) | 03 | 2 | PROF-01, D-01, D-03 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-03 T2 | 03 | 2 | PROF-01, D-02, D-04 | `.venv/bin/python api/test_core.py` | ⬜ pending |
+| 03-03 T3 | 03 | 2 | PROF-01, D-01..D-03, D-06 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-04 T1 (tracer) | 04 | 3 | PROF-05, D-15..D-17 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-04 T2 | 04 | 3 | D-07, D-08, D-09 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+| 03-04 T3 | 04 | 3 | PROF-05, D-15..D-17 | `.venv/bin/python api/test_core.py && .venv/bin/python api/test_api.py` | ⬜ pending |
+
+Every implementation task has an automated verify, so no 3 consecutive tasks lack one. Wave 0 items are covered: requirements and install (03-01 T2), `api/data/` gitignore (03-03 T3), `api/cover_letter.txt` (03-04 T1), PDF and DOCX builders (03-03 T1 and T3), and the rewrite of `test_score_profile_ignored` (03-04 T2).
+
 ---
 
 ## Wave 0 Requirements
