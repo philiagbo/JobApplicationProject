@@ -36,7 +36,8 @@ def run_fetch(conn, settings):
         started = _now()
         prev = STATUS.get(name, {})
         try:
-            counts[name] = db.insert_jobs(conn, call(), settings)
+            jobs = call()  # can take minutes; settings may be saved meanwhile
+            counts[name] = db.insert_jobs(conn, jobs, db.get_settings(conn))  # so score with the latest
             error = None
         except sources.SourceError as e:
             error = str(e)

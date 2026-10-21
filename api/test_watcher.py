@@ -189,6 +189,27 @@ def test_failed_poll_retried_soon():
     assert time.monotonic() - watcher._tick(None) < 5  # a clean poll waits the full interval
 
 
+def test_settings_saved_during_fetch_are_used_for_scoring():
+    fresh()
+    save(career_fields=["python"])
+
+    def slow(url, params, headers=None):
+        save(career_fields=["unrelated"])  # user saves settings while the fetch is in flight
+        return fake_get_json(url, params, headers)
+
+    sources.get_json = slow
+    try:
+        with contextlib.closing(db.connect()) as conn:
+            watcher.run_fetch(conn, db.get_settings(conn))
+            before = [j["score"] for j in db.list_jobs(conn)]
+            db.rescore_new(conn, db.get_settings(conn))
+            assert before and before == [j["score"] for j in db.list_jobs(conn)]
+            db.rescore_new(conn, dict(db.get_settings(conn), career_fields=["python"]))
+            assert before != [j["score"] for j in db.list_jobs(conn)]  # old settings would score differently
+    finally:
+        sources.get_json = fake_get_json
+
+
 def test_unexpected_source_error_isolated():
     fresh()
     save(career_fields=["python"], reed_api_key="key")
