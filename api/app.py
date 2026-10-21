@@ -11,7 +11,7 @@ import watcher
 STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Saving any of these makes the watcher poll now; interval keys are re-read every tick instead.
-WAKE_KEYS = frozenset({"reed_api_key", "adzuna_app_id", "adzuna_app_key", "career_fields"})
+WAKE_KEYS = frozenset({"reed_api_key", "career_fields"})
 
 app = Flask(__name__, static_folder=None)
 db.init_db()

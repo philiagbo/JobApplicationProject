@@ -351,8 +351,8 @@ def test_settings_save_wakes_watcher():
                  {"location": "Leeds"}, {"excluded_words": ["x"]}):
         assert c.put("/api/settings", json=body).status_code == 200, body
         assert not watcher.WAKE.is_set(), body
-    for body in ({"reed_api_key": "x"}, {"career_fields": ["python"]}, {"adzuna_app_id": "a"},
-                 {"adzuna_app_key": "b"}, {"min_salary": 2, "career_fields": ["sql"]}):
+    for body in ({"reed_api_key": "x"}, {"career_fields": ["python"]},
+                 {"min_salary": 2, "career_fields": ["sql"]}):
         watcher.WAKE.clear()
         assert c.put("/api/settings", json=body).status_code == 200, body
         assert watcher.WAKE.is_set(), body

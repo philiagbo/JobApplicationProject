@@ -14,8 +14,6 @@ DEFAULTS = {
     "min_salary": 0,
     "location": "",
     "reed_api_key": "",
-    "adzuna_app_id": "",
-    "adzuna_app_key": "",
     "gmail_poll_minutes": 5,
     "api_poll_minutes": 60,
 }
