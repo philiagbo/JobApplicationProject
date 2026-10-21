@@ -134,6 +134,13 @@ def test_settings_key_masked_and_echo_keeps_real_key():
     assert stored_key() == ""
 
 
+def test_text_settings_are_stripped():
+    c = fresh_client()
+    c.put("/api/settings", json={"reed_api_key": "  abc123456789\n", "location": " Leeds "})
+    assert stored_key() == "abc123456789"
+    assert c.get("/api/settings").get_json()["location"] == "Leeds"
+
+
 def test_settings_rejects_bad_input():
     c = fresh_client()
     bad = [{"nope": 1}, {"min_salary": "40k"}, {"min_salary": True}, {"career_fields": "data"},

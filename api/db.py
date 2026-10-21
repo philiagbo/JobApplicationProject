@@ -97,7 +97,7 @@ def _clean(key, value):
         return value
     if not isinstance(value, str):
         raise ValueError("%s must be text" % key)
-    return value
+    return value.strip()  # a pasted API key often carries a trailing space or newline
 
 
 def save_settings(conn, changes) -> None:
