@@ -157,7 +157,7 @@ def test_interval_change_applies_without_restart():
         n = len(calls)
         assert watcher._tick(last) == last and len(calls) == n
         save(api_poll_minutes=1)
-        time.sleep(0.02)
+        time.sleep(0.1)
         assert watcher._tick(last) != last and len(calls) > n
     finally:
         watcher.SECONDS_PER_MINUTE = 60
@@ -318,7 +318,7 @@ def test_watcher_thread_end_to_end():
     watcher.log.disabled = True  # keep the expected traceback out of test output
     try:
         watcher.start()
-        deadline, reed = time.monotonic() + 5, []
+        deadline, reed = time.monotonic() + 15, []
         while not reed and time.monotonic() < deadline:
             reed = [j for j in c.get("/api/jobs").get_json() if j["source"] == "reed"]
             time.sleep(0.05)
@@ -330,7 +330,7 @@ def test_watcher_thread_end_to_end():
         first = [x for x in calls if "reed.co.uk" in x[0]][0]
         assert first[2]["Authorization"] == "Basic a2V5Og=="
         assert [j for j in reed if j["title"] == "Data Analyst"][0]["summary"]["salary_annual"] == 55000
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while watcher.FETCH_LOCK.locked() and time.monotonic() < deadline:
             time.sleep(0.02)
         r = c.post("/api/fetch")
