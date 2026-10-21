@@ -1,0 +1,43 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": null,
+  "phases": [
+    {
+      "number": "1",
+      "name": "Data, Scoring and First Source",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Watcher and More Sources",
+      "status": "complete"
+    },
+    {
+      "number": "3",
+      "name": "Profile and Answers",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Gmail Alerts and Job Details",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Autofill Worker",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Apply Queue API",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (plan phase 03)",
+    "reason": "Phase 03 of 6 — needs a plan"
+  },
+  "updated_at": "2026-10-21T22:38:01.450Z"
+}
