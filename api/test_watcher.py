@@ -47,6 +47,7 @@ sources.get_json = fake_get_json
 def fresh():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
+    sources.get_json = fake_get_json  # re-install: another test module may have swapped it
     del calls[:]
     FAIL.clear()
     watcher.STATUS.clear()
@@ -302,7 +303,6 @@ def test_failing_tick_with_wake_set_does_not_spin():
 
 
 def test_watcher_thread_end_to_end():
-    # keep this the last test: the daemon thread runs until the process exits
     fresh()
     c = app.app.test_client()
     assert c.put("/api/settings", json={"career_fields": ["data analyst"], "reed_api_key": "key"}).status_code == 200
@@ -342,6 +342,15 @@ def test_watcher_thread_end_to_end():
     finally:
         db.get_settings = real
         watcher.log.disabled = False
+        # stop the thread so it cannot poll other tests' databases when files share a process
+        tick = watcher._tick
+        watcher._tick = lambda last: sys.exit()
+        try:
+            watcher._thread.join(2)
+            assert not watcher._thread.is_alive()
+        finally:
+            watcher._tick = tick
+            watcher._thread = None
 
 
 if __name__ == "__main__":

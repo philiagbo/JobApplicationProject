@@ -79,6 +79,7 @@ sources.get_json = fake_get_json
 def fresh_client():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
+    sources.get_json = fake_get_json  # re-install: another test module may have swapped it
     del calls[:]
     FAIL.clear()
     watcher.STATUS.clear()
