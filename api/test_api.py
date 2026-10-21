@@ -89,13 +89,13 @@ def fresh_client():
 
 
 def count_jobs():
-    with db.connect() as conn:
+    with contextlib.closing(db.connect()) as conn:
         return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
 
 def test_schema_created():
     fresh_client()
-    with db.connect() as conn:
+    with contextlib.closing(db.connect()) as conn:
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"jobs", "answers", "unanswered", "settings"} <= names
 
@@ -224,12 +224,12 @@ def seeded():
 
 
 def sql(query, *args):
-    with db.connect() as conn:
+    with contextlib.closing(db.connect()) as conn, conn:
         conn.execute(query, args)
 
 
 def status_changed(job_id):
-    with db.connect() as conn:
+    with contextlib.closing(db.connect()) as conn:
         return conn.execute("SELECT status_changed_at FROM jobs WHERE id = ?", (job_id,)).fetchone()[0]
 
 
