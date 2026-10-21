@@ -1,26 +1,26 @@
 ---
 phase: 02-watcher-and-more-sources
-fixed_at: 2026-10-21T00:00:00Z
+fixed_at: 2026-10-22T00:00:00Z
 review_path: .planning/phases/02-watcher-and-more-sources/02-REVIEW.md
 iteration: 1
-findings_in_scope: 6
-fixed: 6
+findings_in_scope: 9
+fixed: 9
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 2: Code Review Fix Report
 
-**Fixed at:** 2026-10-21
+**Fixed at:** 2026-10-22
 **Source review:** .planning/phases/02-watcher-and-more-sources/02-REVIEW.md
 **Iteration:** 1
 
 **Summary:**
-- Findings in scope: 6 (fix_scope critical_warning; IN-01..IN-03 not attempted)
-- Fixed: 6
+- Findings in scope: 9 (fix_scope all)
+- Fixed: 9
 - Skipped: 0
 
-**Verification:** run in an isolated git worktree after every fix, then again in the main checkout after the fast-forward. Each file in its own process: `test_core.py` 30, `test_api.py` 32, `test_watcher.py` 18, all printing `ok: N tests`. `pytest -q` in `api/` (both files in one process) also passes, 80 tests, so the WR-04 collision is gone.
+**Verification:** WR-01..WR-06 were run in an isolated git worktree after every fix, then again in the main checkout after the fast-forward. IN-01..IN-03 were fixed and verified directly in the main checkout (no worktree). Each file in its own process: `test_core.py` 30, `test_api.py` 32, `test_watcher.py` 18, all printing `ok: N tests`, final run after IN-03. `pytest -q api/` (both files in one process) also passes, 80 tests, so the WR-04 collision is gone.
 
 ## Fixed Issues
 
@@ -64,8 +64,26 @@ status: all_fixed
 **Commit:** a8ba54e
 **Applied fix:** `_clean` returns `value.strip()` for text settings (`reed_api_key` and `location`). New test `test_text_settings_are_stripped`.
 
+### IN-01: `location` and `min_salary` saves do not wake the watcher
+
+**Files modified:** `api/app.py`, `api/test_api.py`
+**Commit:** 4a593b0
+**Applied fix:** Added `location` and `min_salary` to `WAKE_KEYS`, since both change the Reed query. `test_settings_save_wakes_watcher` now expects them to wake the watcher; `api_poll_minutes`, `gmail_poll_minutes` and `excluded_words` still do not.
+
+### IN-02: Test helpers leave SQLite connections open
+
+**Files modified:** `api/test_api.py`
+**Commit:** 2edc528
+**Applied fix:** The five `with db.connect() as conn:` helpers use `contextlib.closing(db.connect())`. The write helper `sql()` uses `with contextlib.closing(db.connect()) as conn, conn:` so it still commits before closing.
+
+### IN-03: Timing-dependent assertions in the watcher tests
+
+**Files modified:** `api/test_watcher.py`
+**Commit:** 6b79251
+**Applied fix:** `test_interval_change_applies_without_restart` sleeps 0.1 s instead of 0.02 s, and the two 5 s polling deadlines in the end-to-end test are 15 s. No fake clock was added. The 0.3 s spin-detection window in the WR-03 test was left as is, since its bound (under 20 ticks, against thousands if it spun) is loose.
+
 ---
 
-_Fixed: 2026-10-21_
+_Fixed: 2026-10-22_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
