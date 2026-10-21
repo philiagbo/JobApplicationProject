@@ -4,10 +4,10 @@ current_phase: 02
 current_phase_name: Watcher and More Sources
 status: executing
 stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-10-19T22:40:54.207Z"
-last_activity: 2026-10-19
+last_updated: "2026-10-21T22:26:29.438Z"
+last_activity: 2026-10-21
 last_activity_desc: Phase 02 execution started
-state_head: ee7f4a0133acf272c9530b0f6bbadbe50c94f65a
+state_head: 4271a286e96ad2cdd764b292ac0fd1332125bfe0
 progress:
   total_phases: 6
   completed_phases: 1
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 Phase: 02 (Watcher and More Sources) — EXECUTING
 Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-10-19 — Phase 02 execution started
+Last activity: 2026-10-21 - Completed quick task 261021-wez: Remove Adzuna job source
 
 Progress: [██░░░░░░░░] 17%
 
@@ -82,6 +82,12 @@ None yet.
 - [Phase 4]: DETAIL-02 needs a Playwright retry, but the Playwright thread is built in Phase 5 (FILL-01). Plan Phase 4 with the retry behind a small hook that Phase 5 wires to the browser thread, so the single-thread rule is not broken.
 - [Phase 4]: Gmail alerts (GMAIL-01) need to run on the watcher's 5 min interval from Phase 2; plan the wiring in Phase 4.
 - [Phase 4]: Alert parsers need real sample emails from the person; ask for them before planning.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261021-wez | Remove Adzuna job source | 2026-10-21 | 4271a28 | [261021-wez-remove-adzuna-job-source](./quick/261021-wez-remove-adzuna-job-source/) |
 
 ## Deferred Items
 
