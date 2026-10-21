@@ -15,6 +15,7 @@ WAKE = threading.Event()
 STATUS = {}  # type: Dict[str, dict]
 TICK_SECONDS = 30
 SECONDS_PER_MINUTE = 60
+RETRY_SECONDS = 300  # a poll with errors is retried this soon, not after a full api_poll_minutes
 _thread = None  # type: Optional[threading.Thread]
 
 
@@ -69,9 +70,12 @@ def _tick(last: Optional[float]) -> Optional[float]:
             return None  # manual fetch running: stay due, poll when it ends
         started = time.monotonic()
         try:
-            run_fetch(conn, settings)
+            result = run_fetch(conn, settings)
         finally:
             FETCH_LOCK.release()
+        if result["errors"]:
+            interval = settings["api_poll_minutes"] * SECONDS_PER_MINUTE
+            return started - interval + min(RETRY_SECONDS, interval)  # due again in RETRY_SECONDS
         return started
     finally:
         conn.close()

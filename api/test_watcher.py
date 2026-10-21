@@ -177,6 +177,18 @@ def test_failing_source_isolated_and_retried():
     assert len(reed_calls()) == n + 1
 
 
+def test_failed_poll_retried_soon():
+    fresh()
+    save(career_fields=["python"], reed_api_key="key")
+    FAIL.update({"reed.co.uk", "remotive.com"})
+    last = watcher._tick(None)
+    assert 3600 - watcher.RETRY_SECONDS <= time.monotonic() - last < 3600  # due after ~RETRY_SECONDS
+    n = len(calls)
+    assert watcher._tick(last) == last and len(calls) == n  # not due yet
+    FAIL.clear()
+    assert time.monotonic() - watcher._tick(None) < 5  # a clean poll waits the full interval
+
+
 def test_unexpected_source_error_isolated():
     fresh()
     save(career_fields=["python"], reed_api_key="key")
