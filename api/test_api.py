@@ -369,12 +369,11 @@ def test_local_only_guard():
 
 def test_settings_save_wakes_watcher():
     c = fresh_client()
-    for body in ({"min_salary": 1}, {"api_poll_minutes": 5}, {"gmail_poll_minutes": 10},
-                 {"location": "Leeds"}, {"excluded_words": ["x"]}):
+    for body in ({"api_poll_minutes": 5}, {"gmail_poll_minutes": 10}, {"excluded_words": ["x"]}):
         assert c.put("/api/settings", json=body).status_code == 200, body
         assert not watcher.WAKE.is_set(), body
-    for body in ({"reed_api_key": "x"}, {"career_fields": ["python"]},
-                 {"min_salary": 2, "career_fields": ["sql"]}):
+    for body in ({"reed_api_key": "x"}, {"career_fields": ["python"]}, {"min_salary": 1},
+                 {"location": "Leeds"}, {"min_salary": 2, "career_fields": ["sql"]}):
         watcher.WAKE.clear()
         assert c.put("/api/settings", json=body).status_code == 200, body
         assert watcher.WAKE.is_set(), body
