@@ -52,7 +52,7 @@ Plans:
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
 
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -63,7 +63,7 @@ Plans:
 - [x] 02-03-PLAN.md — Settings save wakes the watcher, GET /api/watcher status, manual fetch contract tests (409 / 200 with errors / 502) (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 02-04-PLAN.md — Real-process check plus human verification with a real Reed key (wave 3, checkpoint)
+- [x] 02-04-PLAN.md — Real-process check plus human verification with a real Reed key (wave 3, checkpoint)
 
 ### Phase 3: Profile and Answers
 
@@ -139,7 +139,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data, Scoring and First Source | 3/3 | Complete    | 2026-10-16 |
-| 2. Watcher and More Sources | 3/4 | In Progress|  |
+| 2. Watcher and More Sources | 4/4 | In Progress|  |
 | 3. Profile and Answers | 0/TBD | Not started | - |
 | 4. Gmail Alerts and Job Details | 0/TBD | Not started | - |
 | 5. Autofill Worker | 0/TBD | Not started | - |

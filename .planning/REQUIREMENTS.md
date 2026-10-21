@@ -27,9 +27,9 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 - [x] **SRC-01**: `fetch_remotive` returns jobs with no API key
 - [x] **SRC-02**: New jobs are inserted deduplicated by URL and scored on insert
-- [ ] **SRC-03**: `fetch_reed` returns jobs using the key saved in settings
-- [ ] **WATCH-01**: A watcher thread polls the APIs on the configured interval and keeps running after a source fails
-- [ ] **WATCH-02**: Poll intervals (Gmail 5 min, APIs 60 min by default) are read from settings
+- [x] **SRC-03**: `fetch_reed` returns jobs using the key saved in settings
+- [x] **WATCH-01**: A watcher thread polls the APIs on the configured interval and keeps running after a source fails
+- [x] **WATCH-02**: Poll intervals (Gmail 5 min, APIs 60 min by default) are read from settings
 
 ### Profile & Answers
 
@@ -99,9 +99,9 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 | SCORE-04 | Phase 1 | Complete |
 | SRC-01 | Phase 1 | Complete |
 | SRC-02 | Phase 1 | Complete |
-| SRC-03 | Phase 2 | Pending |
-| WATCH-01 | Phase 2 | Pending |
-| WATCH-02 | Phase 2 | Pending |
+| SRC-03 | Phase 2 | Complete |
+| WATCH-01 | Phase 2 | Complete |
+| WATCH-02 | Phase 2 | Complete |
 | PROF-01 | Phase 3 | Pending |
 | PROF-02 | Phase 3 | Pending |
 | PROF-03 | Phase 3 | Pending |

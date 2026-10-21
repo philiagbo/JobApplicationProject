@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Watcher and More Sources
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-10-21T22:26:29.438Z"
+status: verifying
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-10-21T22:33:19.201Z"
 last_activity: 2026-10-21
 last_activity_desc: Phase 02 execution started
-state_head: 4271a286e96ad2cdd764b292ac0fd1332125bfe0
+state_head: c54a7b439c8354fbed77e791a609c7f7babf405c
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 6
+  completed_plans: 7
   percent: 17
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 
 Phase: 02 (Watcher and More Sources) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-21 - Completed quick task 261021-wez: Remove Adzuna job source
 
 Progress: [██░░░░░░░░] 17%
@@ -59,6 +59,7 @@ Progress: [██░░░░░░░░] 17%
 | Phase 02 P01 | 15 min | 2 tasks | 5 files |
 | Phase 02 P02 | 10 min | 2 tasks | 4 files |
 | Phase 02 P03 | 6 min | 2 tasks | 2 files |
+| Phase 02 P04 | 1 session | 2 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,7 @@ Recent decisions affecting current work:
 - [Phase 02]: Adzuna redirect_url stored as bare scheme://host/path for UNIQUE url dedupe; predicted salary stored empty
 - [Phase 02]: 02-03: PUT /api/settings wakes the watcher only for reed_api_key, adzuna_app_id, adzuna_app_key, career_fields, computed from request keys
 - [Phase 02]: 02-03: GET /api/watcher returns in-memory watcher.status() only, never settings, so keys cannot leak
+- [Phase 02]: 02-04: Phase 2 live check ran Reed-only plus keyless Remotive; Adzuna removed by quick 261021-wez. Reed A5 field names confirmed, dedupe holds, bad key isolated, interval applies live
 
 ### Pending Todos
 
@@ -99,6 +101,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T22:40:54.179Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-10-21T22:33:19.171Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
