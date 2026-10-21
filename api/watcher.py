@@ -89,6 +89,8 @@ def _loop():
             last = _tick(last)
         except Exception:
             log.exception("Watcher tick failed")
+            time.sleep(TICK_SECONDS)  # not WAKE.wait: a set WAKE would make a persistent failure a busy loop
+            continue
         WAKE.wait(TICK_SECONDS)
 
 

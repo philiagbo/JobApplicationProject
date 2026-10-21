@@ -4,6 +4,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 
 os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
@@ -272,6 +273,32 @@ def test_two_sources_one_poll():
     assert all(watcher.STATUS[n]["ok"] is True for n in ("reed", "remotive"))
     with contextlib.closing(db.connect()) as conn:
         assert {j["source"] for j in db.list_jobs(conn)} == {"reed", "remotive"}
+
+
+def test_failing_tick_with_wake_set_does_not_spin():
+    fresh()
+    real, count, stop = watcher._tick, [0], []
+
+    def broken(last):
+        if stop:
+            raise SystemExit  # ends the thread quietly
+        count[0] += 1
+        raise RuntimeError("db locked")
+
+    watcher._tick = broken
+    watcher.log.disabled = True
+    try:
+        watcher.WAKE.set()
+        t = threading.Thread(target=watcher._loop, daemon=True)
+        t.start()
+        time.sleep(0.3)
+        stop.append(1)
+        t.join(2)
+        assert not t.is_alive() and count[0] < 20, count[0]  # ~6 ticks at 0.05 s, thousands if it spun
+    finally:
+        watcher._tick = real
+        watcher.log.disabled = False
+        watcher.WAKE.clear()
 
 
 def test_watcher_thread_end_to_end():
