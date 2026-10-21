@@ -13,7 +13,7 @@ Job Helper is built API-first and bottom-up: pure logic and data before threads,
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data, Scoring and First Source** - SQLite schema, jobs/settings/stats API, rule-based scoring and Remotive, so real ranked jobs show up through the API (completed 2026-10-16)
-- [ ] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive and Reed on configurable intervals
+- [x] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive and Reed on configurable intervals (completed 2026-10-21)
 - [ ] **Phase 3: Profile and Answers** - CV upload extraction, saved answers with matching, and cover letter template
 - [ ] **Phase 4: Gmail Alerts and Job Details** - LinkedIn, Indeed, CV-Library and Totaljobs alerts via Gmail, plus full job descriptions
 - [ ] **Phase 5: Autofill Worker** - Single Playwright thread that fills application forms and detects (never performs) Submit
@@ -52,7 +52,7 @@ Plans:
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
 
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -139,7 +139,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data, Scoring and First Source | 3/3 | Complete    | 2026-10-16 |
-| 2. Watcher and More Sources | 4/4 | In Progress|  |
+| 2. Watcher and More Sources | 4/4 | Complete    | 2026-10-21 |
 | 3. Profile and Answers | 0/TBD | Not started | - |
 | 4. Gmail Alerts and Job Details | 0/TBD | Not started | - |
 | 5. Autofill Worker | 0/TBD | Not started | - |
