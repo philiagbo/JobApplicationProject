@@ -26,8 +26,6 @@ def _sources(settings):
     fields = settings["career_fields"]
     if settings["reed_api_key"]:
         yield "reed", lambda: sources.fetch_reed(fields, settings["reed_api_key"], settings["location"], settings["min_salary"])
-    if settings["adzuna_app_id"] and settings["adzuna_app_key"]:
-        yield "adzuna", lambda: sources.fetch_adzuna(fields, settings["adzuna_app_id"], settings["adzuna_app_key"], settings["location"], settings["min_salary"])
     yield "remotive", lambda: sources.fetch_remotive(fields)
 
 

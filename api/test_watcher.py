@@ -27,35 +27,10 @@ REED_ITEMS = [
      "locationName": "Leeds", "jobDescription": "no salary shown"},
 ]
 
-ADZ = "https://www.adzuna.co.uk/jobs/land/ad/"
-ADZUNA_BASE = [
-    {"id": "1", "title": "Data Analyst", "company": {"display_name": "Acme"}, "location": {"display_name": "London"},
-     "description": "analyse data", "salary_min": 50000, "salary_max": 60000, "salary_is_predicted": "0",
-     "contract_time": "full_time", "redirect_url": ADZ + "1"},
-    {"id": "2", "title": "Contractor", "company": None, "location": None, "description": "guessed pay",
-     "salary_min": 30000, "salary_max": 40000, "salary_is_predicted": "1", "contract_type": "contract",
-     "redirect_url": ADZ + "2"},
-    {"id": "3", "title": "Part timer", "company": {"display_name": "Cee"}, "location": {"display_name": "Leeds"},
-     "salary_min": 20000, "salary_max": 20000, "salary_is_predicted": 1, "contract_time": "part_time",
-     "redirect_url": ADZ + "3"},
-    {"id": "4", "title": "Plain", "company": {"display_name": "Dee"}, "location": {"display_name": "Bath"},
-     "description": "nothing special", "redirect_url": ADZ + "4"},
-]
-ADZUNA = {
-    "data analyst": ADZUNA_BASE,
-    "python": ADZUNA_BASE[:1],
-    "dup": [ADZUNA_BASE[0], ADZUNA_BASE[0]],
-}
-
-
 def fake_get_json(url, params, headers=None):
     calls.append((url, params, headers))
     if any(f in url for f in FAIL):
         raise OSError("down")
-    if "adzuna.com" in url:
-        # the query string changes on every call and every item, as real redirect_url values do
-        return {"results": [dict(it, redirect_url="%s?se=%d_%d&v=%d&utm_medium=api" % (it["redirect_url"], len(calls), i, len(calls)))
-                            for i, it in enumerate(ADZUNA[params["what"]])]}
     if "reed.co.uk" in url:
         return {"results": REED_ITEMS}
     if "remotive.com" in url:
@@ -255,114 +230,15 @@ def test_failure_text_never_contains_key():
     assert texts and not any(key in t for t in texts)
 
 
-def adzuna_calls():
-    return [c for c in calls if "adzuna.com" in c[0]]
-
-
-def test_adzuna_request_params():
+def test_two_sources_one_poll():
     fresh()
-    sources.fetch_adzuna(["data analyst", "python"], "AID", "AKEY", "London", 40000)
-    got = adzuna_calls()
-    assert len(got) == 2
-    for (url, params, headers), field in zip(got, ["data analyst", "python"]):
-        assert url == sources.ADZUNA_URL and "/jobs/gb/search/1" in url
-        assert params == {"app_id": "AID", "app_key": "AKEY", "what": field, "where": "London", "salary_min": 40000,
-                          "results_per_page": 50, "sort_by": "date", "content-type": "application/json"}
-        assert headers is None
-    del calls[:]
-    sources.fetch_adzuna(["python"], "AID", "AKEY")
-    assert "where" not in adzuna_calls()[0][1] and "salary_min" not in adzuna_calls()[0][1]
-
-
-def test_adzuna_mapping():
-    fresh()
-    jobs = sources.fetch_adzuna(["data analyst"], "AID", "AKEY")
-    assert len(jobs) == 4
-    keys = {"url", "source", "title", "company", "location", "salary", "description", "job_type", "remote"}
-    assert all(set(j) == keys and j["source"] == "adzuna" and j["remote"] is None for j in jobs)
-    a, b, c, d = jobs
-    assert (a["company"], a["location"], a["salary"], a["job_type"]) == ("Acme", "London", "\u00a350,000 - \u00a360,000", "Full-time")
-    assert (b["company"], b["location"], b["salary"], b["job_type"]) == ("", "", "", "Contract")  # predicted dropped
-    assert (c["salary"], c["job_type"]) == ("", "Part-time")  # predicted as int 1
-    assert d["job_type"] is None and d["salary"] == ""
-
-
-def test_adzuna_canonical_url_dedupe():
-    fresh()
-    jobs = sources.fetch_adzuna(["dup"], "AID", "AKEY")
-    assert len(jobs) == 1 and jobs[0]["url"] == ADZ + "1" and "?" not in jobs[0]["url"]
-    save(career_fields=["python"], adzuna_app_id="AID", adzuna_app_key="AKEY")
-    with contextlib.closing(db.connect()) as conn:
-        settings = db.get_settings(conn)
-        assert watcher.run_fetch(conn, settings)["by_source"]["adzuna"] == 1
-        assert watcher.run_fetch(conn, settings)["by_source"]["adzuna"] == 0
-
-
-def test_adzuna_failures_hide_keys():
-    fresh()
-    FAIL.add("adzuna.com")
-    try:
-        sources.fetch_adzuna(["python"], "AID", "AKEY")
-        assert False, "expected SourceError"
-    except sources.SourceError as e:
-        assert str(e) == "Adzuna fetch failed: down"
-    FAIL.clear()
-    sources.get_json = lambda url, params, headers=None: {"oops": []}
-    try:
-        sources.fetch_adzuna(["python"], "AID", "AKEY")
-        assert False, "expected SourceError"
-    except sources.SourceError as e:
-        assert str(e).startswith("Adzuna fetch failed")
-    finally:
-        sources.get_json = fake_get_json
-    save(career_fields=["python"], adzuna_app_id="AID-SECRET", adzuna_app_key="AKEY-SECRET")
-    FAIL.add("adzuna.com")
-    with captured() as records:
-        with contextlib.closing(db.connect()) as conn:
-            result = watcher.run_fetch(conn, db.get_settings(conn))
-    assert "adzuna" in result["errors"]
-    texts = [str(v) for s in watcher.STATUS.values() for v in s.values()]
-    texts += list(result["errors"].values()) + [r.getMessage() for r in records]
-    assert texts and not any("AID-SECRET" in t or "AKEY-SECRET" in t for t in texts)
-
-
-def test_adzuna_needs_both_keys():
-    fresh()
-    for only in ({"adzuna_app_id": "AID"}, {"adzuna_app_key": "AKEY"}):
-        save(career_fields=["python"], adzuna_app_id="", adzuna_app_key="")
-        save(**only)
-        with contextlib.closing(db.connect()) as conn:
-            result = watcher.run_fetch(conn, db.get_settings(conn))
-        assert adzuna_calls() == [] and "adzuna" not in result["by_source"]
-        assert "adzuna" not in result["errors"] and "adzuna" not in watcher.STATUS
-    save(adzuna_app_id="AID", adzuna_app_key="AKEY")
-    with contextlib.closing(db.connect()) as conn:
-        assert "adzuna" in watcher.run_fetch(conn, db.get_settings(conn))["by_source"]
-
-
-def test_adzuna_settings_keys():
-    fresh()
-    assert db.DEFAULTS["adzuna_app_id"] == "" and db.DEFAULTS["adzuna_app_key"] == ""
-    try:
-        save(adzuna_app_key=5)
-        assert False, "expected ValueError"
-    except ValueError:
-        pass
-    save(adzuna_app_id="AID", adzuna_app_key="AKEY")
-    with contextlib.closing(db.connect()) as conn:
-        s = db.get_settings(conn)
-    assert s["adzuna_app_id"] == "AID" and s["adzuna_app_key"] == "AKEY"
-
-
-def test_three_sources_one_poll():
-    fresh()
-    save(career_fields=["python"], reed_api_key="key", adzuna_app_id="AID", adzuna_app_key="AKEY")
+    save(career_fields=["python"], reed_api_key="key")
     watcher._tick(None)
-    hosts = [h for u, _, _ in calls for h in ("reed.co.uk", "adzuna.com", "remotive.com") if h in u]
-    assert hosts == ["reed.co.uk", "adzuna.com", "remotive.com"]
-    assert all(watcher.STATUS[n]["ok"] is True for n in ("reed", "adzuna", "remotive"))
+    hosts = [h for u, _, _ in calls for h in ("reed.co.uk", "remotive.com") if h in u]
+    assert hosts == ["reed.co.uk", "remotive.com"]
+    assert all(watcher.STATUS[n]["ok"] is True for n in ("reed", "remotive"))
     with contextlib.closing(db.connect()) as conn:
-        assert {j["source"] for j in db.list_jobs(conn)} == {"reed", "adzuna", "remotive"}
+        assert {j["source"] for j in db.list_jobs(conn)} == {"reed", "remotive"}
 
 
 def test_watcher_thread_end_to_end():
