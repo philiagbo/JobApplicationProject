@@ -19,7 +19,7 @@ Surface well-ranked jobs and pre-fill applications so the person only reviews an
 
 - [ ] SQLite schema and jobs/settings/stats API (current milestone: API first)
 - [ ] Rule-based scoring, pros/cons and summaries in `core.py`
-- [ ] Job sources (Remotive, Reed, Adzuna, Gmail alerts) fed by a watcher thread
+- [ ] Job sources (Remotive, Reed, Gmail alerts) fed by a watcher thread
 - [ ] Profile, CV extraction, saved answers and answer matching
 - [ ] Full job descriptions via `fetch_details`
 - [ ] Playwright autofill worker and Apply queue API

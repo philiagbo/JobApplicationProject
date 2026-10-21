@@ -13,7 +13,7 @@ Job Helper is built API-first and bottom-up: pure logic and data before threads,
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data, Scoring and First Source** - SQLite schema, jobs/settings/stats API, rule-based scoring and Remotive, so real ranked jobs show up through the API (completed 2026-10-16)
-- [ ] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive, Reed and Adzuna on configurable intervals
+- [ ] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive and Reed on configurable intervals
 - [ ] **Phase 3: Profile and Answers** - CV upload extraction, saved answers with matching, and cover letter template
 - [ ] **Phase 4: Gmail Alerts and Job Details** - LinkedIn, Indeed, CV-Library and Totaljobs alerts via Gmail, plus full job descriptions
 - [ ] **Phase 5: Autofill Worker** - Single Playwright thread that fills application forms and detects (never performs) Submit
@@ -43,11 +43,11 @@ Plans:
 
 ### Phase 2: Watcher and More Sources
 
-**Goal**: The job feed refreshes itself in the background from Remotive, Reed and Adzuna
+**Goal**: The job feed refreshes itself in the background from Remotive and Reed
 **Depends on**: Phase 1
 **Requirements**: SRC-03, WATCH-01, WATCH-02
 **Success Criteria** (what must be TRUE):
-  1. After saving Reed and Adzuna keys in settings, jobs from both (Adzuna country `gb`) appear in `GET /api/jobs`, scored and deduplicated
+  1. After saving a Reed key in settings, Reed jobs appear in `GET /api/jobs`, scored and deduplicated
   2. With the app running and nothing triggering a fetch, new jobs appear in the API on the configured poll interval
   3. When one source fails (bad key, network down), the watcher logs it, the other sources still deliver jobs, and the next poll runs as normal
   4. Poll intervals default to Gmail 5 min and APIs 60 min, and changing them in settings changes the polling cadence
@@ -59,11 +59,11 @@ Plans:
 - [x] 02-01-PLAN.md — Tracer: saved Reed key to watcher thread startup poll to scored Reed jobs in GET /api/jobs; shared run_fetch + lock for POST /api/fetch; watcher behaviour tests (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [x] 02-02-PLAN.md — Adzuna (gb) adapter with URL canonicalisation and predicted-salary drop, wired into the watcher; COVERAGE.md for Reed and Adzuna (wave 2)
+- [x] 02-02-PLAN.md — Adzuna (gb) adapter wired into the watcher, plus COVERAGE.md; Adzuna was later removed by quick task 261021-wez and the code stays in git history (wave 2)
 - [x] 02-03-PLAN.md — Settings save wakes the watcher, GET /api/watcher status, manual fetch contract tests (409 / 200 with errors / 502) (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 02-04-PLAN.md — Real-process check plus human verification with real Reed and Adzuna keys (wave 3, checkpoint)
+- [ ] 02-04-PLAN.md — Real-process check plus human verification with a real Reed key (wave 3, checkpoint)
 
 ### Phase 3: Profile and Answers
 

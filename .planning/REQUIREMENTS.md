@@ -27,7 +27,7 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 - [x] **SRC-01**: `fetch_remotive` returns jobs with no API key
 - [x] **SRC-02**: New jobs are inserted deduplicated by URL and scored on insert
-- [ ] **SRC-03**: `fetch_reed` and `fetch_adzuna` (country `gb`) return jobs using the keys saved in settings
+- [ ] **SRC-03**: `fetch_reed` returns jobs using the key saved in settings
 - [ ] **WATCH-01**: A watcher thread polls the APIs on the configured interval and keeps running after a source fails
 - [ ] **WATCH-02**: Poll intervals (Gmail 5 min, APIs 60 min by default) are read from settings
 
