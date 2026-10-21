@@ -62,15 +62,26 @@ def health():
     return jsonify(ok=True)
 
 
+def mask(key):
+    # the UI only needs to know a key is set; PUT ignores this exact echo so a form save can't overwrite the key
+    return "" if not key else "\u2022" * 4 + key[-4:] if len(key) > 8 else "\u2022" * 8
+
+
+def public(settings):
+    return dict(settings, reed_api_key=mask(settings["reed_api_key"]))
+
+
 @app.get("/api/settings")
 def settings_get():
-    return jsonify(db.get_settings(get_db()))
+    return jsonify(public(db.get_settings(get_db())))
 
 
 @app.put("/api/settings")
 def settings_put():
     conn = get_db()
     body = request.get_json(silent=True)
+    if isinstance(body, dict) and body.get("reed_api_key") == mask(db.get_settings(conn)["reed_api_key"]):
+        body = {k: v for k, v in body.items() if k != "reed_api_key"}
     try:
         db.save_settings(conn, body)
     except ValueError as e:
@@ -79,7 +90,7 @@ def settings_put():
         watcher.WAKE.set()
     settings = db.get_settings(conn)
     db.rescore_new(conn, settings)
-    return jsonify(settings)
+    return jsonify(public(settings))
 
 
 @app.get("/api/stats")

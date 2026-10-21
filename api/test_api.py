@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sqlite3
 import sys
@@ -114,10 +115,23 @@ def test_settings_merge():
     assert c.get("/api/settings").get_json() == want
 
 
-def test_settings_keys_returned_in_full():
+def stored_key():
+    with contextlib.closing(db.connect()) as conn:
+        return db.get_settings(conn)["reed_api_key"]
+
+
+def test_settings_key_masked_and_echo_keeps_real_key():
     c = fresh_client()
-    c.put("/api/settings", json={"reed_api_key": "abc123"})
-    assert c.get("/api/settings").get_json()["reed_api_key"] == "abc123"
+    r = c.put("/api/settings", json={"reed_api_key": "abc123456789"})
+    assert r.get_json()["reed_api_key"] == "\u2022" * 4 + "6789"
+    got = c.get("/api/settings").get_json()
+    assert got["reed_api_key"].endswith("6789") and "abc123" not in got["reed_api_key"]
+    assert b"abc123456789" not in r.data and b"abc123456789" not in c.get("/api/settings").data
+    assert c.put("/api/settings", json=dict(got, min_salary=5)).status_code == 200  # form echoes the mask
+    assert stored_key() == "abc123456789"
+    assert c.put("/api/settings", json={"reed_api_key": "short"}).get_json()["reed_api_key"] == "\u2022" * 8
+    assert c.put("/api/settings", json={"reed_api_key": ""}).get_json()["reed_api_key"] == ""
+    assert stored_key() == ""
 
 
 def test_settings_rejects_bad_input():
