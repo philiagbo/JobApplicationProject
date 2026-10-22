@@ -227,6 +227,126 @@ def test_score_profile_ignored():
     assert core.score(j, SETTINGS, {"skills": ["sql"], "years": 1}) == core.score(j, SETTINGS, None)
 
 
+# --- saved answers ----------------------------------------------------------
+
+def row(i, question, answer, updated="2026-10-19 10:00:00"):
+    return {"id": i, "question": question, "answer": answer, "updated_at": updated}
+
+
+VISA = row(1, "do you require visa sponsorship", "No")
+
+
+def test_normalise_label_equivalence():
+    assert core.normalise("Do you require visa-sponsorship?*") == "do you require visa sponsorship"
+
+
+def test_find_answer_exact_beats_fuzzy():
+    rows = [row(1, "do you require a visa sponsorship", "Yes"), VISA]
+    hit = core.find_answer("Do you require visa sponsorship?", rows)
+    assert hit["answer"] == "No" and hit["ratio"] == 1.0
+
+
+def test_find_answer_fuzzy_hits():
+    for label in ("Do you require sponsorship?", "Will you require visa sponsorship?", "Do you need visa sponsorship?"):
+        hit = core.find_answer(label, [VISA])
+        assert hit["answer"] == "No" and 0.85 <= hit["ratio"] < 1.0, label
+
+
+def test_find_answer_wordy_variant_misses():
+    assert core.find_answer("Do you now or in the future require visa sponsorship?", [VISA]) is None
+
+
+def test_find_answer_highest_ratio_wins():
+    rows = [row(1, "do you need visa sponsorship", "close", "2026-10-01 00:00:00"),
+            row(2, "do you require visa sponsorship", "closer", "2026-10-20 00:00:00")]
+    assert core.find_answer("do you require visa sponsorships", rows)["answer"] == "closer"
+    rows[1]["updated_at"] = "2026-09-01 00:00:00"  # the later date must not beat the better ratio
+    assert core.find_answer("do you require visa sponsorships", rows)["answer"] == "closer"
+
+
+def test_find_answer_tie_most_recent():
+    a = row(1, "do you need visa sponsorship a", "A", "2026-10-01 00:00:00")
+    b = row(2, "do you need visa sponsorship b", "B", "2026-10-02 00:00:00")
+    assert core._ratio("do you need visa sponsorship", a["question"]) == core._ratio("do you need visa sponsorship", b["question"])
+    assert core.find_answer("do you need visa sponsorship", [a, b])["answer"] == "B"
+    assert core.find_answer("do you need visa sponsorship", [b, a])["answer"] == "B"
+    a["updated_at"] = b["updated_at"]
+    assert core.find_answer("do you need visa sponsorship", [a, b])["answer"] == "B"  # higher id
+
+
+def test_find_answer_skips_empty_answers():
+    assert core.find_answer("do you require visa sponsorship", [row(1, "do you require visa sponsorship", "")]) is None
+    assert core.find_answer("do you require visa sponsorship", [row(1, "do you require visa sponsorship", "   ")]) is None
+    rows = [row(1, "do you require visa sponsorship", ""), row(2, "do you require a visa sponsorship", "Yes")]
+    assert core.find_answer("do you require visa sponsorship", rows)["answer"] == "Yes"
+
+
+def test_find_answer_empty_inputs():
+    assert core.find_answer("", [VISA]) is None
+    assert core.find_answer("???", [VISA]) is None
+    assert core.find_answer("do you require visa sponsorship", []) is None
+
+
+def test_find_answer_free_text():
+    for options in (None, []):
+        hit = core.find_answer("do you require visa sponsorship", [VISA], options)
+        assert hit["option"] is None and hit["answer"] == "No"
+
+
+def test_map_option_exact_case_insensitive():
+    assert core.map_option("no", ["Yes", "No"]) == "No"
+
+
+def test_map_option_yes_no_prefix():
+    assert core.map_option("Yes", ["Yes, I have the right to work", "No, I do not"]) == "Yes, I have the right to work"
+    assert core.map_option("Yes, I do", ["Yes", "No"]) == "Yes"
+
+
+def test_map_option_ambiguous_never_guesses():
+    opts = ["Yes - UK citizen", "Yes - with visa", "No"]
+    assert core.map_option("Yes", opts) is None
+    assert core.find_answer("do you require visa sponsorship", [row(1, "do you require visa sponsorship", "Yes")], opts) is None
+
+
+def test_map_option_fuzzy():
+    assert core.map_option("Prefer not to say", ["Male", "Female", "I prefer not to say"]) == "I prefer not to say"
+
+
+def test_find_answer_unmappable_returns_none():
+    assert core.find_answer("do you require visa sponsorship", [row(1, "do you require visa sponsorship", "Maybe")],
+                            ["Yes", "No"]) is None
+
+
+def test_find_answer_long_label_fast():
+    rows = [row(i, "question number %d about something %s" % (i, "x" * (i % 40)), "a") for i in range(200)]
+    t0 = time.time()
+    core.find_answer("do you require visa sponsorship " * 3000, rows)
+    assert time.time() - t0 < 1
+
+
+def test_block_length_boundary():
+    assert core.answer_block_reason("q", "a" * 300) is None
+    assert core.answer_block_reason("q", "a" * 301) == "longer than 300 characters"
+    assert core.answer_block_reason("q", " " + "a" * 300 + " ") is None
+
+
+def test_block_company_in_question_or_answer():
+    for company in ("Acme Ltd", "  Acme  "):
+        assert core.answer_block_reason("q", "I like ACME a lot", company) == "mentions the company"
+        assert core.answer_block_reason("Why Acme?", "my reasons", company) == "mentions the company"
+
+
+def test_block_company_whole_words():
+    assert core.answer_block_reason("q", "I am paying off debt", "BT") is None
+    assert core.answer_block_reason("q", "I worked at BT for 3 years", "BT") == "mentions the company"
+
+
+def test_block_without_company():
+    for company in ("", None, "X"):
+        assert core.answer_block_reason("Why Acme?", "I like Acme", company) is None
+    assert core.answer_block_reason("Why Acme?", "", "Acme") is None
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

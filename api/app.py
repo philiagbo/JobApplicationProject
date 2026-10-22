@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -137,6 +138,47 @@ def job_action(job_id, action):
         return jsonify(error="Job not found"), 404
     except ValueError as e:
         return jsonify(error=str(e)), 409
+
+
+@app.get("/api/answers")
+def answers_list():
+    return jsonify(db.list_answers(get_db()))
+
+
+@app.post("/api/answers")
+def answers_post():
+    body = request.get_json(silent=True)
+    try:
+        db.check_answer_body(body, partial=False)
+        # company is only for the check; it is never stored
+        row, created = db.save_answer(get_db(), body["question"], body["answer"], body.get("field_type", ""),
+                                      "profile", body.get("company", ""))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(row), 201 if created else 200
+
+
+@app.put("/api/answers/<int:answer_id>")
+def answers_put(answer_id):
+    body = request.get_json(silent=True)
+    try:
+        db.check_answer_body(body, partial=True)
+        return jsonify(db.update_answer(get_db(), answer_id, body))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except KeyError:
+        return jsonify(error="Answer not found"), 404
+    except sqlite3.IntegrityError:
+        return jsonify(error="An answer for that question already exists"), 409
+
+
+@app.delete("/api/answers/<int:answer_id>")
+def answers_delete(answer_id):
+    try:
+        db.delete_answer(get_db(), answer_id)
+    except KeyError:
+        return jsonify(error="Answer not found"), 404
+    return jsonify(ok=True)
 
 
 # Serve the built React app; unknown paths fall back to index.html so client-side routes work.

@@ -459,6 +459,149 @@ def test_fetch_skips_reed_without_key():
     assert set(c.get("/api/watcher").get_json()["sources"]) == {"remotive"}
 
 
+# --- saved answers ----------------------------------------------------------
+
+def select(query, *args):
+    with contextlib.closing(db.connect()) as conn:
+        return conn.execute(query, args).fetchall()
+
+
+def find(label, options=None):
+    with contextlib.closing(db.connect()) as conn:
+        return db.find_answer(conn, label, options)
+
+
+def test_answer_saved_and_matched_end_to_end():
+    c = fresh_client()
+    r = c.post("/api/answers", json={"question": "Do you require visa sponsorship?", "answer": "No"})
+    assert r.status_code in (200, 201)
+    assert r.get_json()["question"] == "do you require visa sponsorship" and r.get_json()["answer"] == "No"
+    assert {"question": "do you require visa sponsorship", "answer": "No"}.items() <= [
+        a for a in c.get("/api/answers").get_json() if a["question"] == "do you require visa sponsorship"][0].items()
+    hit = find("Will you require visa sponsorship?", ["Yes", "No"])
+    assert hit["option"] == "No" and hit["answer"] == "No" and hit["ratio"] >= 0.85
+    r = c.post("/api/answers", json={"question": "Why do you want to work here?",
+                                     "answer": "I love Acme's products", "company": "Acme Ltd"})
+    assert r.status_code == 400 and r.get_json() == {"error": "Not saved: mentions the company"}
+    assert "why do you want to work here" not in [a["question"] for a in c.get("/api/answers").get_json()]
+
+
+def test_answers_seeded_on_startup():
+    c = fresh_client()
+    rows = c.get("/api/answers").get_json()
+    assert len(rows) == 16 and [r["id"] for r in rows] == sorted(r["id"] for r in rows)
+    assert {r["source"] for r in rows} == {"profile"}
+    by_q = {r["question"]: r["answer"] for r in rows}
+    assert by_q["do you require visa sponsorship"] == ""
+    for q in ("what is your gender", "what is your ethnicity", "do you have a disability",
+              "what is your sexual orientation", "what is your religion or belief"):
+        assert by_q[q] == "Prefer not to say", q
+    assert sum(1 for a in by_q.values() if a) == 5
+    assert find("Do you require visa sponsorship?") is None
+    assert find("What is your gender?", ["Male", "Female", "Prefer not to say"])["option"] == "Prefer not to say"
+
+
+def test_seed_never_overwrites():
+    c = fresh_client()
+    seeded = [a for a in c.get("/api/answers").get_json() if a["question"] == "do you require visa sponsorship"][0]
+    r = c.post("/api/answers", json={"question": "Do you require visa sponsorship?", "answer": "No"})
+    assert r.status_code == 200 and r.get_json()["id"] == seeded["id"]
+    db.init_db()
+    rows = c.get("/api/answers").get_json()
+    assert len(rows) == 16 and [a for a in rows if a["id"] == seeded["id"]][0]["answer"] == "No"
+
+
+def test_answers_create_then_upsert():
+    c = fresh_client()
+    r1 = c.post("/api/answers", json={"question": "Do you hold a clean licence?", "answer": "Yes"})
+    assert r1.status_code == 201 and r1.get_json()["id"]
+    r2 = c.post("/api/answers", json={"question": "do you HOLD a clean licence", "answer": "No"})
+    assert r2.status_code == 200 and r2.get_json()["id"] == r1.get_json()["id"] and r2.get_json()["answer"] == "No"
+    assert len(select("SELECT id FROM answers WHERE question = 'do you hold a clean licence'")) == 1
+    r3 = c.post("/api/answers", json={"question": "do you HOLD a clean licence", "answer": "No"})
+    assert r3.status_code == 200 and r3.get_json()["id"] == r1.get_json()["id"]
+
+
+def test_answers_ordered_by_id():
+    c = fresh_client()
+    seed = [a["question"] for a in c.get("/api/answers").get_json()]
+    assert seed[0] == "what is your address" and len(seed) == 16
+    c.post("/api/answers", json={"question": "First new?", "answer": "a"})
+    c.post("/api/answers", json={"question": "Second new?", "answer": "b"})
+    got = [a["question"] for a in c.get("/api/answers").get_json()]
+    assert got == seed + ["first new", "second new"]
+    assert [a["question"] for a in c.get("/api/answers").get_json()] == got
+
+
+def test_answers_edit():
+    c = fresh_client()
+    a = c.post("/api/answers", json={"question": "Visa?", "answer": "No"}).get_json()
+    b = c.post("/api/answers", json={"question": "What is your notice period?", "answer": "1 month"}).get_json()
+    r = c.put("/api/answers/%d" % a["id"], json={"answer": "Yes"})
+    assert r.status_code == 200 and r.get_json()["answer"] == "Yes" and r.get_json()["question"] == "visa"
+    r = c.put("/api/answers/%d" % a["id"], json={"question": "What is your notice period?"})
+    assert r.status_code == 409 and r.get_json() == {"error": "An answer for that question already exists"}
+    rows = {x["id"]: x for x in c.get("/api/answers").get_json()}
+    assert rows[a["id"]]["question"] == "visa" and rows[a["id"]]["answer"] == "Yes"
+    assert rows[b["id"]]["question"] == "what is your notice period" and rows[b["id"]]["answer"] == "1 month"
+    r = c.put("/api/answers/999999", json={"answer": "x"})
+    assert r.status_code == 404 and r.get_json() == {"error": "Answer not found"}
+    r = c.put("/api/answers/%d" % a["id"], json={})
+    assert r.status_code == 400 and r.get_json() == {"error": "Nothing to change"}
+
+
+def test_answers_delete():
+    c = fresh_client()
+    a = c.post("/api/answers", json={"question": "Visa?", "answer": "No"}).get_json()
+    r = c.delete("/api/answers/%d" % a["id"])
+    assert r.status_code == 200 and r.get_json() == {"ok": True}
+    assert a["id"] not in [x["id"] for x in c.get("/api/answers").get_json()]
+    r = c.delete("/api/answers/%d" % a["id"])
+    assert r.status_code == 404 and r.get_json() == {"error": "Answer not found"}
+
+
+def test_answers_bad_input():
+    c = fresh_client()
+    before = len(c.get("/api/answers").get_json())
+    bad = [(None, "JSON object"), ([1], "JSON object"), ({"question": "x"}, "answer is required"),
+           ({"answer": "a"}, "question is required"), ({"question": "  ", "answer": "a"}, "question is required"),
+           ({"question": "???", "answer": "a"}, "question is required"),
+           ({"question": "q", "answer": "a", "nope": 1}, "Unknown answer field: nope"),
+           ({"question": "q", "answer": 5}, "answer must be text"),
+           ({"question": "a" * 501, "answer": "a"}, "question is longer than 500 characters")]
+    for body, text in bad:
+        r = c.post("/api/answers", data="not json") if body is None else c.post("/api/answers", json=body)
+        assert r.status_code == 400 and text in r.get_json()["error"], (body, r.get_json())
+    assert len(c.get("/api/answers").get_json()) == before
+    r = c.post("/api/answers", json={"question": "Portfolio link?", "answer": ""})
+    assert r.status_code == 201 and r.get_json()["answer"] == ""
+    assert find("Portfolio link?") is None  # an empty answer never matches
+
+
+def test_answers_blocked_writes_nothing():
+    c = fresh_client()
+    n = len(c.get("/api/answers").get_json())
+    r = c.post("/api/answers", json={"question": "Tell us more", "answer": "a" * 301})
+    assert r.status_code == 400 and r.get_json() == {"error": "Not saved: longer than 300 characters"}
+    assert c.post("/api/answers", json={"question": "Tell us more", "answer": "a" * 300}).status_code == 201
+    r = c.post("/api/answers", json={"question": "Why do you want to work at Acme?", "answer": "money", "company": "Acme Ltd"})
+    assert r.status_code == 400 and r.get_json() == {"error": "Not saved: mentions the company"}
+    assert len(c.get("/api/answers").get_json()) == n + 1
+    a = c.post("/api/answers", json={"question": "Why us?", "answer": "growth"}).get_json()
+    r = c.put("/api/answers/%d" % a["id"], json={"answer": "I admire Acme", "company": "Acme"})
+    assert r.status_code == 400 and r.get_json() == {"error": "Not saved: mentions the company"}
+    assert select("SELECT answer FROM answers WHERE id = ?", a["id"])[0][0] == "growth"
+    assert c.post("/api/answers", json={"question": "Why us?", "answer": "I admire Acme"}).status_code == 200
+
+
+def test_answer_save_clears_unanswered():
+    c = fresh_client()
+    sql("INSERT INTO unanswered (question) VALUES ('do you have a full uk driving licence')")
+    sql("INSERT INTO unanswered (question) VALUES ('what is your notice period')")
+    c.post("/api/answers", json={"question": "Do you have a full UK driving licence?", "answer": "Yes"})
+    assert [r[0] for r in select("SELECT question FROM unanswered")] == ["what is your notice period"]
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:

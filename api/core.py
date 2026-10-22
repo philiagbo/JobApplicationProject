@@ -1,3 +1,4 @@
+import difflib
 import html
 import re
 from typing import Dict, List, Optional, Tuple
@@ -224,3 +225,69 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
         total -= EXCLUDED_POINTS
 
     return max(0, min(100, int(total))), pros, cons
+
+
+# --- saved answers ----------------------------------------------------------
+
+FUZZY_MIN = 0.85
+MAX_ANSWER_CHARS = 300
+MAX_QUESTION_CHARS = 500
+_LEGAL = {"ltd", "limited", "plc", "inc", "llc", "llp", "corp", "corporation", "co", "uk"}
+
+
+def answer_block_reason(question: str, answer: str, company: Optional[str] = "") -> Optional[str]:
+    """Why an answer must not be saved for reuse (D-12), or None. Whole-word match, like excluded words in score."""
+    if not (answer or "").strip():
+        return None
+    if len(answer.strip()) > MAX_ANSWER_CHARS:
+        return "longer than %d characters" % MAX_ANSWER_CHARS
+    words = normalise(company or "").split()
+    name = " ".join([w for w in words if w not in _LEGAL] or words)
+    if len(name) >= 2 and any(" %s " % name in " %s " % normalise(t) for t in (question, answer)):
+        return "mentions the company"
+    return None
+
+
+def _ratio(a: str, b: str) -> float:
+    # autojunk=False: the default junk heuristic distorts ratios on strings of 200+ characters
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+def _polarity(norm_text: str) -> Optional[str]:
+    first = norm_text.split(" ")[0]
+    return first if first in ("yes", "no") else None
+
+
+def map_option(answer: str, options: List[str]) -> Optional[str]:
+    """Pick the option a saved answer means (D-11); None when unclear, never a guess."""
+    na = normalise(answer)
+    if not na:
+        return None
+    norm = [(o, normalise(o)) for o in options]
+    exact = next((o for o, n in norm if n == na), None)
+    if exact:
+        return exact
+    pol = _polarity(na)
+    same = [o for o, n in norm if pol and _polarity(n) == pol]
+    if len(same) == 1:
+        return same[0]
+    best = max(norm, key=lambda p: _ratio(na, p[1]), default=None)
+    return best[0] if best and _ratio(na, best[1]) >= FUZZY_MIN else None
+
+
+def find_answer(label: str, answers: List[dict], options: Optional[List[str]] = None) -> Optional[dict]:
+    """Best saved answer for a form label: exact first, then fuzzy >= FUZZY_MIN (D-10). answers hold normalised questions."""
+    q = normalise(label)[:MAX_QUESTION_CHARS]
+    rows = [a for a in answers if (a["answer"] or "").strip()]
+    if not q or not rows:
+        return None
+    # an exact match scores 1.0, so one max covers exact-then-fuzzy; ties go to newest updated_at, then highest id
+    hit = max(rows, key=lambda a: (_ratio(q, a["question"]), a["updated_at"], a["id"]))
+    ratio = _ratio(q, hit["question"])
+    if ratio < FUZZY_MIN:
+        return None
+    option = map_option(hit["answer"], options) if options else None
+    if options and option is None:
+        return None
+    return {"id": hit["id"], "question": hit["question"], "answer": hit["answer"],
+            "ratio": round(ratio, 3), "option": option}

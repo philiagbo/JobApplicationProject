@@ -4,7 +4,7 @@ import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import core
 
@@ -72,6 +72,7 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with closing(connect()) as conn:
         conn.executescript(SCHEMA)
+        seed_answers(conn)
 
 
 def get_settings(conn) -> dict:
@@ -189,3 +190,108 @@ def set_status(conn, job_id: int, action: str) -> dict:
     if cur.rowcount != 1:
         raise ValueError("Cannot %s a job that is %s" % (action, row["status"]))
     return job_dict(row)
+
+
+# --- saved answers ----------------------------------------------------------
+
+_OPT_OUT = "Prefer not to say"
+# Wording is a guess at common ATS phrasing so fuzzy hits are likelier (RESEARCH Pattern 9); empty = person fills in.
+SEED_QUESTIONS = [
+    ("What is your address?", ""),
+    ("Do you have the right to work in the UK?", ""),
+    ("Do you require visa sponsorship?", ""),
+    ("What is your notice period?", ""),
+    ("When can you start?", ""),
+    ("What are your salary expectations?", ""),
+    ("Are you willing to relocate?", ""),
+    ("Do you have a full UK driving licence?", ""),
+    ("What is your highest qualification?", ""),
+    ("Portfolio or website URL", ""),
+    ("How did you hear about this job?", ""),
+    ("What is your gender?", _OPT_OUT),
+    ("What is your ethnicity?", _OPT_OUT),
+    ("Do you have a disability?", _OPT_OUT),
+    ("What is your sexual orientation?", _OPT_OUT),
+    ("What is your religion or belief?", _OPT_OUT),
+]  # type: List[Tuple[str, str]]
+
+
+def seed_answers(conn) -> None:
+    with conn:  # OR IGNORE on the UNIQUE question: seeding never overwrites what the person typed
+        conn.executemany("INSERT OR IGNORE INTO answers (question, answer, source) VALUES (?, ?, 'profile')",
+                         [(core.normalise(q), a) for q, a in SEED_QUESTIONS])
+
+
+def list_answers(conn) -> List[dict]:
+    return [dict(r) for r in conn.execute("SELECT * FROM answers ORDER BY id")]
+
+
+def check_answer_body(body, partial: bool) -> dict:
+    if not isinstance(body, dict):
+        raise ValueError("Answer must be a JSON object")
+    for key, value in body.items():
+        if key not in ("question", "answer", "field_type", "company"):
+            raise ValueError("Unknown answer field: %s" % key)
+        if not isinstance(value, str):
+            raise ValueError("%s must be text" % key)
+    if not partial:
+        for key in ("question", "answer"):
+            if key not in body:
+                raise ValueError("%s is required" % key)
+    return body
+
+
+def _check_question(question: str) -> str:
+    q = core.normalise(question)
+    if not q:
+        raise ValueError("question is required")
+    if len(q) > core.MAX_QUESTION_CHARS:
+        raise ValueError("question is longer than %d characters" % core.MAX_QUESTION_CHARS)
+    return q
+
+
+def save_answer(conn, question: str, answer: str, field_type: str = "", source: str = "learned",
+                company: str = "") -> Tuple[dict, bool]:
+    q = _check_question(question)
+    if (reason := core.answer_block_reason(question, answer, company)):
+        raise ValueError("Not saved: " + reason)
+    with conn:
+        existed = conn.execute("SELECT 1 FROM answers WHERE question = ?", (q,)).fetchone() is not None
+        # one statement, so two simultaneous saves of a question cannot make two rows; last write wins
+        conn.execute(
+            "INSERT INTO answers (question, answer, field_type, source) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(question) DO UPDATE SET answer = excluded.answer,"
+            " field_type = COALESCE(NULLIF(excluded.field_type, ''), answers.field_type),"
+            " updated_at = datetime('now')",
+            (q, answer.strip(), field_type, source))
+        conn.execute("DELETE FROM unanswered WHERE question = ?", (q,))
+        row = conn.execute("SELECT * FROM answers WHERE question = ?", (q,)).fetchone()
+    return dict(row), not existed
+
+
+def update_answer(conn, answer_id: int, changes: dict) -> dict:
+    if not any(k in changes for k in ("question", "answer", "field_type")):
+        raise ValueError("Nothing to change")
+    row = conn.execute("SELECT * FROM answers WHERE id = ?", (answer_id,)).fetchone()
+    if row is None:
+        raise KeyError(answer_id)
+    question = changes.get("question", row["question"])
+    answer = changes.get("answer", row["answer"])
+    q = _check_question(question)
+    if (reason := core.answer_block_reason(question, answer, changes.get("company", ""))):
+        raise ValueError("Not saved: " + reason)
+    with conn:  # a rename onto another row's question raises sqlite3.IntegrityError
+        conn.execute("UPDATE answers SET question = ?, answer = ?, field_type = ?, updated_at = datetime('now')"
+                     " WHERE id = ?", (q, answer.strip(), changes.get("field_type", row["field_type"]), answer_id))
+        conn.execute("DELETE FROM unanswered WHERE question = ?", (q,))
+        return dict(conn.execute("SELECT * FROM answers WHERE id = ?", (answer_id,)).fetchone())
+
+
+def delete_answer(conn, answer_id: int) -> None:
+    with conn:
+        if conn.execute("DELETE FROM answers WHERE id = ?", (answer_id,)).rowcount == 0:
+            raise KeyError(answer_id)
+
+
+def find_answer(conn, label: str, options: Optional[List[str]] = None) -> Optional[dict]:
+    return core.find_answer(label, list_answers(conn), options)
