@@ -33,11 +33,11 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 
 ### Profile & Answers
 
-- [ ] **PROF-01**: CV upload (PDF or DOCX) pre-fills name, email, phone, LinkedIn and skills
-- [ ] **PROF-02**: `/api/answers` supports list, create, edit and delete of saved answers
-- [ ] **PROF-03**: `find_answer` matches a label by exact then fuzzy (≥ 0.85) lookup and maps the answer onto dropdown or radio options
-- [ ] **PROF-04**: Answers that mention the company name or exceed 300 characters are not saved
-- [ ] **PROF-05**: `cover_letter` fills an editable template from the profile and job
+- [x] **PROF-01**: CV upload (PDF or DOCX) pre-fills name, email, phone, LinkedIn and skills
+- [x] **PROF-02**: `/api/answers` supports list, create, edit and delete of saved answers
+- [x] **PROF-03**: `find_answer` matches a label by exact then fuzzy (≥ 0.85) lookup and maps the answer onto dropdown or radio options
+- [x] **PROF-04**: Answers that mention the company name or exceed 300 characters are not saved
+- [x] **PROF-05**: `cover_letter` fills an editable template from the profile and job
 
 ### Gmail Alerts & Job Details
 
@@ -102,11 +102,11 @@ Scope: the API (Flask, SQLite, background threads). UI pages come after. Built b
 | SRC-03 | Phase 2 | Complete |
 | WATCH-01 | Phase 2 | Complete |
 | WATCH-02 | Phase 2 | Complete |
-| PROF-01 | Phase 3 | Pending |
-| PROF-02 | Phase 3 | Pending |
-| PROF-03 | Phase 3 | Pending |
-| PROF-04 | Phase 3 | Pending |
-| PROF-05 | Phase 3 | Pending |
+| PROF-01 | Phase 3 | Complete |
+| PROF-02 | Phase 3 | Complete |
+| PROF-03 | Phase 3 | Complete |
+| PROF-04 | Phase 3 | Complete |
+| PROF-05 | Phase 3 | Complete |
 | GMAIL-01 | Phase 4 | Pending |
 | GMAIL-02 | Phase 4 | Pending |
 | DETAIL-01 | Phase 4 | Pending |

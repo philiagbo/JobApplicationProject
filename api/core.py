@@ -1,3 +1,4 @@
+import datetime
 import difflib
 import html
 import re
@@ -174,6 +175,8 @@ SALARY_ABOVE_POINTS = 30
 REMOTE_POINTS = 10
 HYBRID_POINTS = 5
 EXCLUDED_POINTS = 25
+SKILL_POINTS_EACH = 2
+SKILL_POINTS_CAP = 10  # below TITLE_POINTS, so salary stays the heaviest rule
 
 
 def k(n: float) -> str:
@@ -181,7 +184,7 @@ def k(n: float) -> str:
 
 
 def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[int, List[str], List[str]]:
-    # profile is accepted and ignored: skills/experience rules wait for Phase 3 (D-05).
+    # D-08: no experience-gap or missing-requirements rules; only the skills rule below reads the profile.
     pros = []  # type: List[str]
     cons = []  # type: List[str]
     total = BASE_SCORE
@@ -215,6 +218,11 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
     elif summary.get("remote") == "Hybrid":
         total += HYBRID_POINTS
         pros.append("Hybrid working")
+
+    hits = matched_skills((profile or {}).get("skills") or [], job)
+    if hits:
+        total += min(SKILL_POINTS_EACH * len(hits), SKILL_POINTS_CAP)
+        pros.append("Matches %d of your skills: %s%s" % (len(hits), ", ".join(hits[:3]), "…" if len(hits) > 3 else ""))
 
     # Excluded words cost points but never hide the job (D-04); one penalty however many hit.
     haystack = " %s %s " % (normalise(job.get("title", "")), normalise(" ".join(_text_lines(job.get("description") or ""))))
@@ -291,3 +299,122 @@ def find_answer(label: str, answers: List[dict], options: Optional[List[str]] = 
         return None
     return {"id": hit["id"], "question": hit["question"], "answer": hit["answer"],
             "ratio": round(ratio, 3), "option": option}
+
+
+# --- CV extraction ----------------------------------------------------------
+
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,5}")
+_LINKEDIN = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/[\w%-]+", re.I)
+_PHONE = re.compile(r"(?<![\w+])\+?\(?\d[\d \t().-]{7,18}\d(?!\w)")  # no \s: a number must not span lines
+_NOT_NAME = {"cv", "resume", "curriculum vitae", "profile", "personal details", "contact"}
+_YEAR = re.compile(r"^(?:19|20)\d\d$")
+_NAME_WORD = re.compile(r"^[^\W\d_](?:[^\W\d_]|['.\-])*$")
+_SKILL_HEADS = {"skills", "key skills", "core skills", "technical skills", "skills and tools", "skills summary"}
+_SKILL_STOPS = {"experience", "work experience", "employment", "work history", "education", "projects",
+                "certifications", "references", "interests", "summary", "profile", "languages"}
+_SKILL_SPLIT = re.compile(r"[,;•·|]")
+_PAREN_TAIL = re.compile(r"\s*\([^()]{0,60}\)\s*$")
+
+
+def has_term(text: str, term: str) -> bool:
+    # not padded-normalise matching: that turns C++ and C# into the same token
+    return re.search(r"(?<![A-Za-z0-9+#])%s(?![A-Za-z0-9+#])" % re.escape(term), text or "", re.I) is not None
+
+
+def dedupe_skills(skills: List[str]) -> List[str]:
+    seen, out = set(), []
+    for s in skills:
+        s = s.strip()
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            out.append(s)
+    return out
+
+
+def merge_profile(current: dict, extracted: dict) -> dict:
+    """Fill only empty fields; skills are merged with the existing spelling first (D-02)."""
+    out = {}
+    for key in ("name", "email", "phone", "linkedin"):
+        out[key] = current.get(key, "") if (current.get(key) or "").strip() else extracted.get(key, "")
+    out["skills"] = dedupe_skills(list(current.get("skills") or []) + list(extracted.get("skills") or []))
+    return out
+
+
+def _extract_name(lines: List[str]) -> str:
+    # ponytail: a one-word name followed by a job-title line yields the job title; the profile is editable
+    # and an upload never overwrites a filled field.
+    for line in lines[:8]:
+        words = line.split()
+        if (2 <= len(words) <= 4 and len(line) <= 40 and normalise(line) not in _NOT_NAME
+                and all(_NAME_WORD.match(w) for w in words)):
+            return line.title() if line.isupper() else line
+    return ""
+
+
+def _extract_phone(text: str) -> str:
+    for m in _PHONE.finditer(text):
+        s = m.group().strip()
+        digits = re.findall(r"\d+", s)
+        if 10 <= sum(len(d) for d in digits) <= 13 and not all(_YEAR.match(d) for d in digits):
+            return s
+    return ""
+
+
+def _extract_skills(text: str, lines: List[str], known_skills: List[str]) -> List[str]:
+    found = [s for s in known_skills if has_term(text, s)]
+    section = []  # type: List[str]
+    for i, line in enumerate(lines):
+        if len(line) <= 40 and line[0] not in "-*·•" and normalise(line) in _SKILL_HEADS:
+            for ln in lines[i + 1:i + 13]:
+                if normalise(ln) in _SKILL_STOPS:
+                    break
+                for item in _SKILL_SPLIT.split(ln):
+                    item = _PAREN_TAIL.sub("", item.strip(" \t-*"))
+                    if item and len(item) <= 40 and len(item.split()) <= 4:
+                        section.append(item)
+            break
+    return dedupe_skills(found + section)
+
+
+def extract_profile(text: str, known_skills: Optional[List[str]] = None) -> dict:
+    # known_skills is the user's known_skills setting, matched across the whole CV (empty by default)
+    # ponytail: a LinkedIn URL behind link text (PDF annotations, DOCX relationships) is not seen;
+    # scan the PDF /Annots URIs for linkedin.com/in if that matters.
+    text = text or ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    email = _EMAIL.search(text)
+    li = _LINKEDIN.search(text)
+    linkedin = li.group() if li else ""
+    if linkedin and not linkedin.lower().startswith("http"):
+        linkedin = "https://" + linkedin
+    return {"name": _extract_name(lines), "email": email.group() if email else "",
+            "phone": _extract_phone(text), "linkedin": linkedin, "skills": _extract_skills(text, lines, known_skills or [])}
+
+
+# --- skills match and cover letter ------------------------------------------
+
+def matched_skills(profile_skills: List[str], job: dict) -> List[str]:
+    text = "%s %s" % (job.get("title") or "", " ".join(_text_lines(job.get("description") or "")))
+    return [s for s in profile_skills if has_term(text, s)]
+
+
+_PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+# not strftime("%B"): month names follow the Windows locale
+_MONTHS = ["January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"]
+
+
+def _join_and(items: List[str]) -> str:
+    return ", ".join(items[:-1]) + " and " + items[-1] if len(items) > 1 else "".join(items)
+
+
+def cover_letter(profile, job, template, today=None):
+    """Fill the template from the profile and job (D-16). Only {known} names change; one regex pass, never str.format."""
+    d = today or datetime.date.today()
+    skills = profile.get("skills") or []
+    values = {"name": profile.get("name") or "", "email": profile.get("email") or "",
+              "phone": profile.get("phone") or "",
+              "company": (job.get("company") or "").strip(), "job_title": (job.get("title") or "").strip(),
+              "top_skills": _join_and((matched_skills(skills, job) or skills)[:3]),
+              "date": "%d %s %d" % (d.day, _MONTHS[d.month - 1], d.year)}
+    return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)

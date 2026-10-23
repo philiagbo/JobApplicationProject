@@ -1,4 +1,5 @@
 """Plain-assert tests for core.py. Run: python api/test_core.py (no pytest)."""
+import datetime
 import os
 import sys
 import time
@@ -222,9 +223,54 @@ def test_score_clamped():
     assert sc(job(salary="£10,000", title="Senior Analyst"), excluded_words=["senior"])[0] == 0
 
 
-def test_score_profile_ignored():
+def test_matched_skills_title_and_description():
+    j = {"title": "Python Developer", "description": "<li>Excel</li><li><b>sql</b></li>"}
+    assert core.matched_skills(["Python", "Excel", "SQL"], j) == ["Python", "Excel", "SQL"]
+    assert core.matched_skills(["Rust"], j) == [] and core.matched_skills(["SQL"], {"title": "x"}) == []
+
+
+def skills_pros(j, skills):
+    return [p for p in core.score(j, SETTINGS, {"skills": skills})[1] if p.startswith("Matches")]
+
+
+def test_score_skills_pro_and_boost():
+    j = job(description="Excel, SQL, Python and Tableau daily")
+    four = ["Excel", "SQL", "Python", "Tableau"]
+    assert core.score(j, SETTINGS, {"skills": four})[0] == core.score(j, SETTINGS)[0] + 8
+    assert skills_pros(j, four) == ["Matches 4 of your skills: Excel, SQL, Python…"]
+    assert skills_pros(j, four[:3]) == ["Matches 3 of your skills: Excel, SQL, Python"]
+    assert skills_pros(j, ["SQL"]) == ["Matches 1 of your skills: SQL"]
+
+
+def test_score_skills_capped():
+    names = ["Excel", "SQL", "Python", "Tableau", "Java", "Rust"]
+    j = job(description=", ".join(names))
+    assert core.score(j, SETTINGS, {"skills": names})[0] == core.score(j, SETTINGS)[0] + core.SKILL_POINTS_CAP
+
+
+def test_score_salary_dominates_skills():
+    names = ["Excel", "SQL", "Python", "Tableau", "Java", "Rust"]
+    skilled = core.score(job(description=", ".join(names)), SETTINGS, {"skills": names})[0]
+    assert sc(job(salary="£45,000"))[0] > skilled
+    assert core.SKILL_POINTS_CAP < core.TITLE_POINTS < core.SALARY_ABOVE_POINTS
+
+
+def test_score_no_skills_no_effect():
     j = job(title="Data Analyst", salary="£45,000")
-    assert core.score(j, SETTINGS, {"skills": ["sql"], "years": 1}) == core.score(j, SETTINGS, None)
+    want = core.score(j, SETTINGS, None)
+    for profile in ({}, {"skills": []}, {"skills": ["Rust"]}):
+        assert core.score(j, SETTINGS, profile) == want
+
+
+def test_score_skill_terms_exact():
+    skills = ["C++", ".NET", "SQL"]
+    assert skills_pros(job(description="We use C# and ASP.NET with MySQL"), skills) == []
+    assert skills_pros(job(description="Modern C++ and .NET services"), skills) == ["Matches 2 of your skills: C++, .NET"]
+
+
+def test_score_no_experience_gap_rule():
+    j = job(description="5+ years of experience with SQL required")
+    assert core.score(j, SETTINGS, {"skills": ["SQL"], "years": 1})[2] == core.score(j, SETTINGS)[2]
 
 
 # --- saved answers ----------------------------------------------------------
@@ -345,6 +391,143 @@ def test_block_without_company():
     for company in ("", None, "X"):
         assert core.answer_block_reason("Why Acme?", "I like Acme", company) is None
     assert core.answer_block_reason("Why Acme?", "", "Acme") is None
+
+
+EMPTY_PROFILE = {"name": "", "email": "", "phone": "", "linkedin": "", "skills": []}
+
+
+def test_extract_profile_empty():
+    assert core.extract_profile("") == EMPTY_PROFILE
+
+
+def test_extract_email():
+    assert core.extract_profile("Contact: jane.doe+cv@example.co.uk | 07700 900123")["email"] == "jane.doe+cv@example.co.uk"
+
+
+def test_extract_phone_formats():
+    for phone in ("07700 900123", "+44 (0)20 7946 0958", "+44 7700 900 123", "(555) 123-4567"):
+        assert core.extract_profile("Jane Doe\nCall " + phone + "\n")["phone"] == phone, phone
+
+
+def test_extract_phone_rejects_years_and_refs():
+    assert core.extract_profile("Data Analyst 2019 - 2023")["phone"] == ""
+    assert core.extract_profile("Ref 12345678901234")["phone"] == ""
+
+
+def test_extract_linkedin():
+    for text, want in (("linkedin.com/in/jane-doe-123", "https://linkedin.com/in/jane-doe-123"),
+                       ("https://www.linkedin.com/in/jsmith/", "https://www.linkedin.com/in/jsmith"),
+                       ("uk.linkedin.com/in/mjw", "https://uk.linkedin.com/in/mjw")):
+        assert core.extract_profile(text)["linkedin"] == want, text
+
+
+def test_extract_name():
+    name = lambda text: core.extract_profile(text)["name"]  # noqa: E731
+    assert name("Jane Doe\njane@example.com") == "Jane Doe"
+    assert name("Curriculum Vitae\nJOHN O'NEILL-SMITH") == "John O'Neill-Smith"
+    assert name("Mary-Jane Watson") == "Mary-Jane Watson"
+    assert name("Dr. Ana Maria Lopez") == "Dr. Ana Maria Lopez"
+    assert name("jane@example.com\nJane Doe") == "Jane Doe"
+
+
+def test_extract_skills_section_and_known():
+    text = "\n".join(["Jane Doe", "Key Skills", "Excel, SQL (advanced); Stakeholder management | CI/CD",
+                       "Experience", "Built dashboards in Tableau and Python"])
+    skills = core.extract_profile(text, ["Excel", "SQL", "Python", "Tableau", "R"])["skills"]
+    assert skills[:4] == ["Excel", "SQL", "Python", "Tableau"], skills
+    assert skills[4:] == ["Stakeholder management", "CI/CD"], skills
+    assert not any("dashboards" in s for s in skills)
+
+
+def test_extract_skills_drops_sentences():
+    text = "Skills\nCommunicating clearly with executives across the business, Excel"
+    assert core.extract_profile(text)["skills"] == ["Excel"]
+
+
+def test_has_term_symbols():
+    assert core.has_term("We use C++ and Node.js daily", "C++")
+    assert core.has_term("a .NET dev", ".NET")
+    assert core.has_term("Experience with SQL.", "SQL")
+    assert not core.has_term("We use C# and .NET", "C")
+    assert not core.has_term("MySQL database", "SQL")
+    assert not core.has_term("ASP.NET", ".NET")
+
+
+def test_known_skills_default_empty():
+    text = "Care Assistant\nSkills\nFirst aid, Safeguarding\nExperience\nMedication administration and Excel"
+    assert core.extract_profile(text)["skills"] == ["First aid", "Safeguarding"]
+    skills = core.extract_profile(text, ["Medication administration"])["skills"]
+    assert skills == ["Medication administration", "First aid", "Safeguarding"], skills
+
+
+def test_dedupe_skills():
+    assert core.dedupe_skills(["SQL", "sql", " Excel ", "", "excel"]) == ["SQL", "Excel"]
+
+
+def test_merge_profile_fills_only_empty():
+    current = {"name": "Janet D", "email": "", "phone": " ", "linkedin": "", "skills": ["sql"]}
+    extracted = {"name": "Jane Doe", "email": "jane@example.com", "phone": "07700 900123",
+                 "linkedin": "", "skills": ["SQL", "Excel"]}
+    before = (dict(current, skills=list(current["skills"])), dict(extracted, skills=list(extracted["skills"])))
+    out = core.merge_profile(current, extracted)
+    assert out == {"name": "Janet D", "email": "jane@example.com", "phone": "07700 900123",
+                   "linkedin": "", "skills": ["sql", "Excel"]}
+    assert (current, extracted) == before
+
+
+def test_extract_profile_adversarial_fast():
+    start = time.time()
+    core.extract_profile("+44 (0) 1-2.3 @a.b linkedin.com/in/ " * (200000 // 37))
+    assert time.time() - start < 2
+
+# --- cover letter -----------------------------------------------------------
+
+ALL = "{name}|{email}|{phone}|{company}|{job_title}|{top_skills}|{date}"
+DAY = datetime.date(2026, 10, 19)
+JANE = {"name": "Jane Doe", "email": "jane@example.com", "phone": "07700 900123", "skills": ["Excel", "SQL", "Python"]}
+
+
+def test_cover_letter_fills_placeholders():
+    j = {"title": "Data Analyst", "company": " Acme ", "description": "SQL and Excel"}
+    assert core.cover_letter(JANE, j, ALL, DAY) == \
+        "Jane Doe|jane@example.com|07700 900123|Acme|Data Analyst|Excel and SQL|19 October 2026"
+
+
+def test_cover_letter_unknown_and_missing():
+    assert core.cover_letter({"name": "J"}, {}, "{foo} {Name} [{phone}]", DAY) == "{foo} {Name} []"
+    assert core.cover_letter({}, {}, ALL, DAY) == "||||||19 October 2026"
+
+
+def test_cover_letter_top_skills():
+    def top(skills, text):
+        return core.cover_letter({"skills": skills}, {"description": text}, "{top_skills}", DAY)
+    assert top(["A", "B", "C", "D"], "") == "A, B and C"
+    assert top(["A", "B", "C", "D"], "A B C D") == "A, B and C"
+    assert top(["A", "B", "C"], "B and C") == "B and C"
+    assert top(["A", "B", "C"], "C") == "C"
+    assert top([], "A") == ""
+
+
+def test_cover_letter_never_invents_skills():
+    j = {"description": "Python, Java and SQL required"}
+    assert core.cover_letter({"skills": ["Excel"]}, j, "{top_skills}", DAY) == "Excel"
+
+
+def test_cover_letter_braces_literal():
+    t = "{name.__class__} {0} {} and a stray { or }"
+    assert core.cover_letter(JANE, {}, t, DAY) == t
+
+
+def test_cover_letter_english_months():
+    assert core.cover_letter({}, {}, "{date}", datetime.date(2027, 1, 1)) == "1 January 2027"
+    assert core.cover_letter({}, {}, "{date}", datetime.date(2026, 12, 31)) == "31 December 2026"
+
+
+def test_cover_letter_pure():
+    profile, j = dict(JANE, skills=list(JANE["skills"])), {"title": "T", "company": " C ", "description": "SQL"}
+    before = (dict(profile), dict(j))
+    assert core.cover_letter(profile, j, ALL, DAY) == core.cover_letter(profile, j, ALL, DAY)
+    assert (profile, j) == before
 
 
 if __name__ == "__main__":
