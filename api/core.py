@@ -1,3 +1,4 @@
+import datetime
 import difflib
 import html
 import re
@@ -174,6 +175,8 @@ SALARY_ABOVE_POINTS = 30
 REMOTE_POINTS = 10
 HYBRID_POINTS = 5
 EXCLUDED_POINTS = 25
+SKILL_POINTS_EACH = 2
+SKILL_POINTS_CAP = 10  # below TITLE_POINTS, so salary stays the heaviest rule
 
 
 def k(n: float) -> str:
@@ -181,7 +184,7 @@ def k(n: float) -> str:
 
 
 def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[int, List[str], List[str]]:
-    # profile is accepted and ignored: skills/experience rules wait for Phase 3 (D-05).
+    # D-08: no experience-gap or missing-requirements rules; only the skills rule below reads the profile.
     pros = []  # type: List[str]
     cons = []  # type: List[str]
     total = BASE_SCORE
@@ -215,6 +218,11 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
     elif summary.get("remote") == "Hybrid":
         total += HYBRID_POINTS
         pros.append("Hybrid working")
+
+    hits = matched_skills((profile or {}).get("skills") or [], job)
+    if hits:
+        total += min(SKILL_POINTS_EACH * len(hits), SKILL_POINTS_CAP)
+        pros.append("Matches %d of your skills: %s%s" % (len(hits), ", ".join(hits[:3]), "…" if len(hits) > 3 else ""))
 
     # Excluded words cost points but never hide the job (D-04); one penalty however many hit.
     haystack = " %s %s " % (normalise(job.get("title", "")), normalise(" ".join(_text_lines(job.get("description") or ""))))
@@ -381,3 +389,32 @@ def extract_profile(text: str, known_skills: Optional[List[str]] = None) -> dict
         linkedin = "https://" + linkedin
     return {"name": _extract_name(lines), "email": email.group() if email else "",
             "phone": _extract_phone(text), "linkedin": linkedin, "skills": _extract_skills(text, lines, known_skills or [])}
+
+
+# --- skills match and cover letter ------------------------------------------
+
+def matched_skills(profile_skills: List[str], job: dict) -> List[str]:
+    text = "%s %s" % (job.get("title") or "", " ".join(_text_lines(job.get("description") or "")))
+    return [s for s in profile_skills if has_term(text, s)]
+
+
+_PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+# not strftime("%B"): month names follow the Windows locale
+_MONTHS = ["January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"]
+
+
+def _join_and(items: List[str]) -> str:
+    return ", ".join(items[:-1]) + " and " + items[-1] if len(items) > 1 else "".join(items)
+
+
+def cover_letter(profile, job, template, today=None):
+    """Fill the template from the profile and job (D-16). Only {known} names change; one regex pass, never str.format."""
+    d = today or datetime.date.today()
+    skills = profile.get("skills") or []
+    values = {"name": profile.get("name") or "", "email": profile.get("email") or "",
+              "phone": profile.get("phone") or "",
+              "company": (job.get("company") or "").strip(), "job_title": (job.get("title") or "").strip(),
+              "top_skills": _join_and((matched_skills(skills, job) or skills)[:3]),
+              "date": "%d %s %d" % (d.day, _MONTHS[d.month - 1], d.year)}
+    return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)

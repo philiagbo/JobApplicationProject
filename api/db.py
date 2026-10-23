@@ -17,6 +17,7 @@ DEFAULTS = {
     "reed_api_key": "",
     "gmail_poll_minutes": 5,
     "api_poll_minutes": 60,
+    "cover_letter_template": "",
 }
 
 SCHEMA = """
@@ -121,12 +122,14 @@ def job_dict(row) -> dict:
     return d
 
 
-def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
+def insert_jobs(conn, jobs: List[dict], settings: dict, profile: Optional[dict] = None) -> int:
+    if profile is None:
+        profile = get_profile(conn)
     new = 0
     with conn:
         for job in jobs:
             summary = core.summarize(job)
-            total, pros, cons = core.score(dict(job, summary=summary), settings)
+            total, pros, cons = core.score(dict(job, summary=summary), settings, profile)
             cur = conn.execute(
                 "INSERT OR IGNORE INTO jobs (url, source, title, company, location, salary, description,"
                 " summary, score, pros, cons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -137,6 +140,13 @@ def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
             if cur.rowcount == 1:
                 new += 1
     return new
+
+
+def get_job(conn, job_id: int) -> dict:
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise KeyError(job_id)
+    return job_dict(row)
 
 
 def list_jobs(conn, status: str = "new") -> List[dict]:
@@ -161,10 +171,12 @@ def stats(conn) -> dict:
     return out
 
 
-def rescore_new(conn, settings: dict) -> None:
+def rescore_new(conn, settings: dict, profile: Optional[dict] = None) -> None:
+    if profile is None:
+        profile = get_profile(conn)
     with conn:
         for row in conn.execute("SELECT * FROM jobs WHERE status = 'new'").fetchall():
-            total, pros, cons = core.score(job_dict(row), settings)
+            total, pros, cons = core.score(job_dict(row), settings, profile)
             conn.execute("UPDATE jobs SET score = ?, pros = ?, cons = ? WHERE id = ?",
                          (total, json.dumps(pros), json.dumps(cons), row["id"]))
 

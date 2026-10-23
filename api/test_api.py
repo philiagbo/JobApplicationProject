@@ -768,6 +768,92 @@ def test_cv_upload_ignores_client_filename():
     assert not list(db.cv_dir().glob("evil*")) and not list(db.cv_dir().parent.glob("evil*"))
 
 
+def add_job(slug, title, description="", company="Acme "):
+    job = {"url": "https://example.com/jobs/" + slug, "source": "test", "title": title,
+           "company": company, "description": description}
+    with contextlib.closing(db.connect()) as conn:
+        db.insert_jobs(conn, [job], db.get_settings(conn))
+        return conn.execute("SELECT id FROM jobs WHERE url = ?", (job["url"],)).fetchone()[0]
+
+
+def job_by_id(c, job_id, status="new"):
+    return next(j for j in c.get("/api/jobs?status=" + status).get_json() if j["id"] == job_id)
+
+
+def test_cover_letter_end_to_end():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Jane Doe", "email": "jane@example.com", "phone": "07700 900123",
+                                "skills": ["SQL", "Excel", "Python", "Tableau"]})
+    r = c.get("/api/jobs/%d/cover-letter" % add_job("cl-1", "Data Analyst", "<p>We use SQL and Python every day.</p>"))
+    text = r.get_json()["text"]
+    assert r.status_code == 200
+    for want in ("Dear Hiring Manager,", "Data Analyst role at Acme.", "SQL and Python", "Jane Doe",
+                 "jane@example.com", "07700 900123"):
+        assert want in text, want
+    assert not any("{%s}" % n in text for n in
+                   ("name", "email", "phone", "company", "job_title", "top_skills", "date"))
+
+
+def test_cover_letter_template_setting():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Jane Doe"})
+    path = os.path.join(os.path.dirname(app.__file__), "cover_letter.txt")
+    before = open(path, "rb").read()
+    url = "/api/jobs/%d/cover-letter" % add_job("cl-2", "Analyst")
+    c.put("/api/settings", json={"cover_letter_template": "Hi {company}, {foo} from {name}"})
+    assert c.get(url).get_json()["text"] == "Hi Acme, {foo} from Jane Doe"
+    c.put("/api/settings", json={"cover_letter_template": "   "})
+    assert c.get(url).get_json()["text"].startswith("Dear Hiring Manager,")
+    assert open(path, "rb").read() == before
+
+
+def test_cover_letter_unknown_job_404():
+    c = fresh_client()
+    r = c.get("/api/jobs/999999/cover-letter")
+    assert r.status_code == 404 and r.get_json() == {"error": "Job not found"}
+
+
+def test_cover_letter_nothing_stored():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Jane Doe", "skills": ["SQL"]})
+    job_id = add_job("cl-3", "Analyst", "SQL")
+
+    def state():
+        with contextlib.closing(db.connect()) as conn:
+            return (tuple(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()),
+                    conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0])
+
+    before = state()
+    first = c.get("/api/jobs/%d/cover-letter" % job_id).get_json()
+    assert c.get("/api/jobs/%d/cover-letter" % job_id).get_json() == first
+    assert state() == before
+
+
+def test_profile_change_rescores_new_only():
+    c = fresh_client()
+    fresh, queued = add_job("rs-1", "Analyst", "We use SQL"), add_job("rs-2", "Analyst", "We use SQL")
+    c.post("/api/jobs/%d/queue" % queued)
+    old_new, old_queued = job_by_id(c, fresh), job_by_id(c, queued, "queued")
+    c.put("/api/profile", json={"skills": ["SQL"]})
+    new_new, new_queued = job_by_id(c, fresh), job_by_id(c, queued, "queued")
+    assert new_new["score"] == old_new["score"] + 2
+    assert new_new["pros"] == old_new["pros"] + ["Matches 1 of your skills: SQL"]
+    assert (new_queued["score"], new_queued["pros"]) == (old_queued["score"], old_queued["pros"])
+
+
+def test_cv_upload_rescores():
+    c = fresh_client()
+    job_id = add_job("rs-3", "Analyst", "Excel and SQL")
+    assert upload(c, make_pdf(CV_LINES), "me.pdf").status_code == 200
+    assert "Matches 2 of your skills: Excel, SQL" in job_by_id(c, job_id)["pros"]
+
+
+def test_new_jobs_scored_with_profile():
+    c = fresh_client()
+    c.put("/api/profile", json={"skills": ["SQL"]})
+    assert "Matches 1 of your skills: SQL" in job_by_id(c, add_job("rs-4", "Analyst", "SQL needed"))["pros"]
+
+
 if __name__ == "__main__":
     tests = [f for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     for t in tests:

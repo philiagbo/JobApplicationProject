@@ -12,6 +12,7 @@ import db
 import watcher
 
 STATIC = Path(__file__).parent / "static"
+DEFAULT_COVER_LETTER = Path(__file__).parent / "cover_letter.txt"  # read-only default (D-15)
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Saving any of these makes the watcher poll now; interval keys are re-read every tick instead.
 WAKE_KEYS = frozenset({"reed_api_key", "career_fields", "location", "min_salary"})
@@ -201,6 +202,7 @@ def profile_put():
         db.save_profile(conn, request.get_json(silent=True))
     except ValueError as e:
         return jsonify(error=str(e)), 400
+    db.rescore_new(conn, db.get_settings(conn))  # D-09: after the save, so the new profile is the one used
     return jsonify(_profile_json(conn))
 
 
@@ -224,7 +226,21 @@ def profile_cv():
     extracted = core.extract_profile(text, db.get_settings(conn)["known_skills"])
     db.store_cv(data, kind)  # parse first, store second: a 400 never changes the file or the profile
     db.save_profile(conn, core.merge_profile(db.get_profile(conn), extracted))
+    db.rescore_new(conn, db.get_settings(conn))
     return jsonify(_profile_json(conn))
+
+
+@app.get("/api/jobs/<int:job_id>/cover-letter")
+def job_cover_letter(job_id):
+    conn = get_db()
+    try:
+        job = db.get_job(conn, job_id)
+    except KeyError:
+        return jsonify(error="Job not found"), 404
+    template = db.get_settings(conn)["cover_letter_template"]
+    if not template.strip():
+        template = DEFAULT_COVER_LETTER.read_text(encoding="utf-8")  # Windows defaults to cp1252
+    return jsonify(text=core.cover_letter(db.get_profile(conn), job, template))
 
 
 # Serve the built React app; unknown paths fall back to index.html so client-side routes work.
