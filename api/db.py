@@ -10,6 +10,7 @@ import core
 
 DEFAULTS = {
     "career_fields": [],
+    "known_skills": [],
     "excluded_words": [],
     "min_salary": 0,
     "location": "",
@@ -83,8 +84,8 @@ def get_settings(conn) -> dict:
     return out
 
 
-def _clean(key, value):
-    default = DEFAULTS[key]
+def _clean(key, value, defaults=DEFAULTS):
+    default = defaults[key]
     if isinstance(default, list):
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ValueError("%s must be a list of strings" % key)
@@ -295,3 +296,49 @@ def delete_answer(conn, answer_id: int) -> None:
 
 def find_answer(conn, label: str, options: Optional[List[str]] = None) -> Optional[dict]:
     return core.find_answer(label, list_answers(conn), options)
+
+
+# --- profile and stored CV --------------------------------------------------
+
+PROFILE_DEFAULTS = {"name": "", "email": "", "phone": "", "linkedin": "", "skills": []}
+
+
+def get_profile(conn) -> dict:
+    out = copy.deepcopy(PROFILE_DEFAULTS)
+    row = conn.execute("SELECT value FROM settings WHERE key = 'profile'").fetchone()
+    if row:
+        out.update({k: v for k, v in json.loads(row["value"]).items() if k in PROFILE_DEFAULTS})
+    return out
+
+
+def save_profile(conn, changes) -> dict:
+    if not isinstance(changes, dict):
+        raise ValueError("Profile must be a JSON object")
+    for key in changes:
+        if key not in PROFILE_DEFAULTS:
+            raise ValueError("Unknown profile field: %s" % key)
+    merged = dict(get_profile(conn), **{k: _clean(k, v, PROFILE_DEFAULTS) for k, v in changes.items()})
+    merged["skills"] = core.dedupe_skills(merged["skills"])
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('profile', ?)", (json.dumps(merged),))
+    return merged
+
+
+def cv_dir() -> Path:
+    return Path(db_path()).parent
+
+
+def cv_file_name() -> str:
+    return next((n for n in ("cv.pdf", "cv.docx") if (cv_dir() / n).is_file()), "")
+
+
+def store_cv(data: bytes, ext: str) -> None:
+    """Keep one CV under a fixed name (D-03); the name never comes from the client."""
+    d = cv_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / ("cv." + ext + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(str(tmp), str(d / ("cv." + ext)))  # atomic: an interrupted upload never leaves half a file
+    for other in ("pdf", "docx"):
+        if other != ext:
+            (d / ("cv." + other)).unlink(missing_ok=True)

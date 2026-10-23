@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
+import core
+import cv
 import db
 import watcher
 
@@ -13,6 +15,8 @@ STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # Saving any of these makes the watcher poll now; interval keys are re-read every tick instead.
 WAKE_KEYS = frozenset({"reed_api_key", "career_fields", "location", "min_salary"})
+# ponytail: a read cap (not MAX_CONTENT_LENGTH) gives the specific 400; Flask's limit would 413 every oversize request, JSON included.
+MAX_CV_BYTES = 10 * 1024 * 1024
 
 app = Flask(__name__, static_folder=None)
 db.init_db()
@@ -179,6 +183,48 @@ def answers_delete(answer_id):
     except KeyError:
         return jsonify(error="Answer not found"), 404
     return jsonify(ok=True)
+
+
+def _profile_json(conn):
+    return dict(db.get_profile(conn), cv_file=db.cv_file_name())
+
+
+@app.get("/api/profile")
+def profile_get():
+    return jsonify(_profile_json(get_db()))
+
+
+@app.put("/api/profile")
+def profile_put():
+    conn = get_db()
+    try:
+        db.save_profile(conn, request.get_json(silent=True))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(_profile_json(conn))
+
+
+@app.post("/api/profile/cv")
+def profile_cv():
+    f = request.files.get("cv")
+    if f is None or not f.filename:
+        return jsonify(error="No file uploaded"), 400
+    ext = os.path.splitext(f.filename.lower())[1]  # the client filename is used for nothing else
+    if ext not in (".pdf", ".docx"):
+        return jsonify(error="Upload a PDF or DOCX file"), 400
+    kind = ext[1:]
+    data = f.stream.read(MAX_CV_BYTES + 1)
+    if len(data) > MAX_CV_BYTES:
+        return jsonify(error="CV is larger than 10 MB"), 400
+    try:
+        text = cv.read_cv_text(data, kind)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    conn = get_db()
+    extracted = core.extract_profile(text, db.get_settings(conn)["known_skills"])
+    db.store_cv(data, kind)  # parse first, store second: a 400 never changes the file or the profile
+    db.save_profile(conn, core.merge_profile(db.get_profile(conn), extracted))
+    return jsonify(_profile_json(conn))
 
 
 # Serve the built React app; unknown paths fall back to index.html so client-side routes work.

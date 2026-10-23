@@ -1,10 +1,13 @@
 import contextlib
+import io
+import logging
 import os
 import sqlite3
 import sys
 import tempfile
 import time
 
+import docx
 from flask.testing import FlaskClient
 
 os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
@@ -600,6 +603,169 @@ def test_answer_save_clears_unanswered():
     sql("INSERT INTO unanswered (question) VALUES ('what is your notice period')")
     c.post("/api/answers", json={"question": "Do you have a full UK driving licence?", "answer": "Yes"})
     assert [r[0] for r in select("SELECT question FROM unanswered")] == ["what is your notice period"]
+
+
+# --- profile and CV upload --------------------------------------------------
+
+def make_pdf(lines):
+    esc = lambda s: s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")  # noqa: E731
+    stream = "BT /F1 12 Tf 14 TL 72 720 Td " + " ".join("(%s) Tj T*" % esc(ln) for ln in lines) + " ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+            " /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offs = b"%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += ("%d 0 obj\n%s\nendobj\n" % (i, o)).encode("latin-1")
+    x = len(out)
+    out += ("xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)).encode()
+    for o in offs:
+        out += ("%010d 00000 n \n" % o).encode()
+    return out + ("trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF" % (len(objs) + 1, x)).encode()
+
+
+def make_docx(*blocks):
+    """A str block is a paragraph; a list of 2-tuples is a 2-column table. Built in the order given."""
+    d = docx.Document()
+    for block in blocks:
+        if isinstance(block, str):
+            d.add_paragraph(block)
+        else:
+            table = d.add_table(rows=len(block), cols=2)
+            for row, pair in zip(table.rows, block):
+                row.cells[0].text, row.cells[1].text = pair
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+CV_LINES = ["Jane Doe", "jane@example.com | 07700 900123", "Skills", "Excel, SQL (advanced), Python"]
+
+
+def upload(c, data, filename):
+    return c.post("/api/profile/cv", data={"cv": (io.BytesIO(data), filename)}, content_type="multipart/form-data")
+
+
+def cv_files():
+    return sorted(p.name for p in db.cv_dir().iterdir() if p.name.startswith("cv"))
+
+
+def test_cv_upload_end_to_end():
+    c = fresh_client()
+    pdf = make_pdf(CV_LINES)
+    r = upload(c, pdf, "me.pdf")
+    body = r.get_json()
+    assert r.status_code == 200 and body["name"] == "Jane Doe" and body["email"] == "jane@example.com"
+    assert body["cv_file"] == "cv.pdf"
+    got = c.get("/api/profile").get_json()
+    assert got["name"] == "Jane Doe" and got["email"] == "jane@example.com"
+    assert (db.cv_dir() / "cv.pdf").read_bytes() == pdf
+
+
+def test_profile_defaults():
+    c = fresh_client()
+    assert c.get("/api/profile").get_json() == {"name": "", "email": "", "phone": "", "linkedin": "",
+                                                "skills": [], "cv_file": ""}
+    c.put("/api/profile", json={"name": "Jane"})
+    assert "profile" not in c.get("/api/settings").get_json()
+
+
+def test_profile_put_merge():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Jane Doe"})
+    r = c.put("/api/profile", json={"skills": [" SQL ", "sql", "Excel", ""]})
+    assert r.status_code == 200 and r.get_json()["name"] == "Jane Doe" and r.get_json()["skills"] == ["SQL", "Excel"]
+    assert c.get("/api/profile").get_json()["skills"] == ["SQL", "Excel"]
+
+
+def test_profile_put_rejects_bad_input():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Jane Doe"})
+    before = c.get("/api/profile").get_json()
+    assert c.put("/api/profile", data="not json", content_type="text/plain").status_code == 400
+    for body in ([1], {"nope": 1}, {"cv_file": "x.pdf"}, {"name": 5}, {"skills": "sql"}, {"skills": [1]}):
+        r = c.put("/api/profile", json=body)
+        assert r.status_code == 400 and "error" in r.get_json(), body
+    assert c.get("/api/profile").get_json() == before
+
+
+def test_cv_upload_pdf_all_fields():
+    c = fresh_client()
+    lines = ["Jane Doe", "jane@example.com | 07700 900123", "linkedin.com/in/jane-doe", "Skills",
+             "Excel, SQL (advanced), Python"]
+    body = upload(c, make_pdf(lines), "cv.pdf").get_json()
+    assert (body["name"], body["email"], body["phone"]) == ("Jane Doe", "jane@example.com", "07700 900123")
+    assert body["linkedin"] == "https://linkedin.com/in/jane-doe"
+    assert body["skills"] == ["Excel", "SQL", "Python"]
+
+
+def test_cv_upload_docx_with_table():
+    c = fresh_client()
+    data = make_docx("Sam Patel", [("Phone", "+44 7700 900 123"), ("LinkedIn", "linkedin.com/in/sam-patel")],
+                     "Skills", "Excel; Stakeholder management")
+    body = upload(c, data, "sam.docx").get_json()
+    assert body["name"] == "Sam Patel" and body["phone"] == "+44 7700 900 123"
+    assert body["linkedin"] == "https://linkedin.com/in/sam-patel"
+    assert body["skills"] == ["Excel", "Stakeholder management"]
+    assert body["cv_file"] == "cv.docx"
+
+
+def test_cv_upload_uses_known_skills_setting():
+    c = fresh_client()
+    lines = ["Jane Doe", "Skills", "First aid", "Experience", "Safeguarding training for care staff"]
+    assert upload(c, make_pdf(lines), "cv.pdf").get_json()["skills"] == ["First aid"]
+    c.put("/api/settings", json={"known_skills": ["Safeguarding"]})
+    assert upload(c, make_pdf(lines), "cv.pdf").get_json()["skills"] == ["First aid", "Safeguarding"]
+
+
+def test_cv_upload_keeps_hand_edits():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Janet D", "skills": ["sql"]})
+    body = upload(c, make_pdf(CV_LINES), "cv.pdf").get_json()
+    assert body["name"] == "Janet D" and body["email"] == "jane@example.com"
+    assert body["skills"] == ["sql", "Excel", "Python"]
+
+
+def test_cv_upload_rejects():
+    c = fresh_client()
+    c.put("/api/profile", json={"name": "Keep Me"})
+    upload(c, make_pdf(CV_LINES), "cv.pdf")
+    before = (c.get("/api/profile").get_json(), cv_files(), (db.cv_dir() / "cv.pdf").read_bytes())
+    logging.disable(logging.WARNING)  # keep the expected "unreadable CV" warnings out of test output
+    try:
+        cases = [
+            (c.post("/api/profile/cv", data={}, content_type="multipart/form-data"), "No file uploaded"),
+            (upload(c, b"hello", "cv.txt"), "Upload a PDF or DOCX file"),
+            (upload(c, b"not a pdf", "cv.pdf"), "Couldn't read text from this CV"),
+            (upload(c, b"%PDF-" + b"0" * app.MAX_CV_BYTES, "cv.pdf"), "CV is larger than 10 MB"),
+            (upload(c, make_pdf([]), "cv.pdf"), "Couldn't read text from this CV"),
+            (upload(c, b"PK\x03\x04junk", "cv.docx"), "Couldn't read text from this CV"),
+        ]
+        # exactly 10 MB passes the size check (it then fails as unreadable, not as too large)
+        edge = upload(c, b"%PDF-" + b"0" * (app.MAX_CV_BYTES - 5), "cv.pdf").get_json()
+    finally:
+        logging.disable(logging.NOTSET)
+    for r, error in cases:
+        assert r.status_code == 400 and r.get_json() == {"error": error}, (r.status_code, r.get_json(), error)
+    assert edge == {"error": "Couldn't read text from this CV"}
+    assert (c.get("/api/profile").get_json(), cv_files(), (db.cv_dir() / "cv.pdf").read_bytes()) == before
+
+
+def test_cv_upload_replaces_file():
+    c = fresh_client()
+    upload(c, make_pdf(CV_LINES), "a.pdf")
+    body = upload(c, make_docx("Sam Patel", "Skills", "Excel"), "b.docx").get_json()
+    assert cv_files() == ["cv.docx"] and body["cv_file"] == "cv.docx"
+    assert not list(db.cv_dir().glob("*.tmp"))
+
+
+def test_cv_upload_ignores_client_filename():
+    c = fresh_client()
+    assert upload(c, make_pdf(CV_LINES), "../../evil.pdf").status_code == 200
+    assert cv_files() == ["cv.pdf"]
+    assert not list(db.cv_dir().glob("evil*")) and not list(db.cv_dir().parent.glob("evil*"))
 
 
 if __name__ == "__main__":

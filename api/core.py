@@ -291,3 +291,93 @@ def find_answer(label: str, answers: List[dict], options: Optional[List[str]] = 
         return None
     return {"id": hit["id"], "question": hit["question"], "answer": hit["answer"],
             "ratio": round(ratio, 3), "option": option}
+
+
+# --- CV extraction ----------------------------------------------------------
+
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,5}")
+_LINKEDIN = re.compile(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/[\w%-]+", re.I)
+_PHONE = re.compile(r"(?<![\w+])\+?\(?\d[\d \t().-]{7,18}\d(?!\w)")  # no \s: a number must not span lines
+_NOT_NAME = {"cv", "resume", "curriculum vitae", "profile", "personal details", "contact"}
+_YEAR = re.compile(r"^(?:19|20)\d\d$")
+_NAME_WORD = re.compile(r"^[^\W\d_](?:[^\W\d_]|['.\-])*$")
+_SKILL_HEADS = {"skills", "key skills", "core skills", "technical skills", "skills and tools", "skills summary"}
+_SKILL_STOPS = {"experience", "work experience", "employment", "work history", "education", "projects",
+                "certifications", "references", "interests", "summary", "profile", "languages"}
+_SKILL_SPLIT = re.compile(r"[,;•·|]")
+_PAREN_TAIL = re.compile(r"\s*\([^()]{0,60}\)\s*$")
+
+
+def has_term(text: str, term: str) -> bool:
+    # not padded-normalise matching: that turns C++ and C# into the same token
+    return re.search(r"(?<![A-Za-z0-9+#])%s(?![A-Za-z0-9+#])" % re.escape(term), text or "", re.I) is not None
+
+
+def dedupe_skills(skills: List[str]) -> List[str]:
+    seen, out = set(), []
+    for s in skills:
+        s = s.strip()
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            out.append(s)
+    return out
+
+
+def merge_profile(current: dict, extracted: dict) -> dict:
+    """Fill only empty fields; skills are merged with the existing spelling first (D-02)."""
+    out = {}
+    for key in ("name", "email", "phone", "linkedin"):
+        out[key] = current.get(key, "") if (current.get(key) or "").strip() else extracted.get(key, "")
+    out["skills"] = dedupe_skills(list(current.get("skills") or []) + list(extracted.get("skills") or []))
+    return out
+
+
+def _extract_name(lines: List[str]) -> str:
+    # ponytail: a one-word name followed by a job-title line yields the job title; the profile is editable
+    # and an upload never overwrites a filled field.
+    for line in lines[:8]:
+        words = line.split()
+        if (2 <= len(words) <= 4 and len(line) <= 40 and normalise(line) not in _NOT_NAME
+                and all(_NAME_WORD.match(w) for w in words)):
+            return line.title() if line.isupper() else line
+    return ""
+
+
+def _extract_phone(text: str) -> str:
+    for m in _PHONE.finditer(text):
+        s = m.group().strip()
+        digits = re.findall(r"\d+", s)
+        if 10 <= sum(len(d) for d in digits) <= 13 and not all(_YEAR.match(d) for d in digits):
+            return s
+    return ""
+
+
+def _extract_skills(text: str, lines: List[str], known_skills: List[str]) -> List[str]:
+    found = [s for s in known_skills if has_term(text, s)]
+    section = []  # type: List[str]
+    for i, line in enumerate(lines):
+        if len(line) <= 40 and line[0] not in "-*·•" and normalise(line) in _SKILL_HEADS:
+            for ln in lines[i + 1:i + 13]:
+                if normalise(ln) in _SKILL_STOPS:
+                    break
+                for item in _SKILL_SPLIT.split(ln):
+                    item = _PAREN_TAIL.sub("", item.strip(" \t-*"))
+                    if item and len(item) <= 40 and len(item.split()) <= 4:
+                        section.append(item)
+            break
+    return dedupe_skills(found + section)
+
+
+def extract_profile(text: str, known_skills: Optional[List[str]] = None) -> dict:
+    # known_skills is the user's known_skills setting, matched across the whole CV (empty by default)
+    # ponytail: a LinkedIn URL behind link text (PDF annotations, DOCX relationships) is not seen;
+    # scan the PDF /Annots URIs for linkedin.com/in if that matters.
+    text = text or ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    email = _EMAIL.search(text)
+    li = _LINKEDIN.search(text)
+    linkedin = li.group() if li else ""
+    if linkedin and not linkedin.lower().startswith("http"):
+        linkedin = "https://" + linkedin
+    return {"name": _extract_name(lines), "email": email.group() if email else "",
+            "phone": _extract_phone(text), "linkedin": linkedin, "skills": _extract_skills(text, lines, known_skills or [])}

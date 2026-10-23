@@ -347,6 +347,94 @@ def test_block_without_company():
     assert core.answer_block_reason("Why Acme?", "", "Acme") is None
 
 
+EMPTY_PROFILE = {"name": "", "email": "", "phone": "", "linkedin": "", "skills": []}
+
+
+def test_extract_profile_empty():
+    assert core.extract_profile("") == EMPTY_PROFILE
+
+
+def test_extract_email():
+    assert core.extract_profile("Contact: jane.doe+cv@example.co.uk | 07700 900123")["email"] == "jane.doe+cv@example.co.uk"
+
+
+def test_extract_phone_formats():
+    for phone in ("07700 900123", "+44 (0)20 7946 0958", "+44 7700 900 123", "(555) 123-4567"):
+        assert core.extract_profile("Jane Doe\nCall " + phone + "\n")["phone"] == phone, phone
+
+
+def test_extract_phone_rejects_years_and_refs():
+    assert core.extract_profile("Data Analyst 2019 - 2023")["phone"] == ""
+    assert core.extract_profile("Ref 12345678901234")["phone"] == ""
+
+
+def test_extract_linkedin():
+    for text, want in (("linkedin.com/in/jane-doe-123", "https://linkedin.com/in/jane-doe-123"),
+                       ("https://www.linkedin.com/in/jsmith/", "https://www.linkedin.com/in/jsmith"),
+                       ("uk.linkedin.com/in/mjw", "https://uk.linkedin.com/in/mjw")):
+        assert core.extract_profile(text)["linkedin"] == want, text
+
+
+def test_extract_name():
+    name = lambda text: core.extract_profile(text)["name"]  # noqa: E731
+    assert name("Jane Doe\njane@example.com") == "Jane Doe"
+    assert name("Curriculum Vitae\nJOHN O'NEILL-SMITH") == "John O'Neill-Smith"
+    assert name("Mary-Jane Watson") == "Mary-Jane Watson"
+    assert name("Dr. Ana Maria Lopez") == "Dr. Ana Maria Lopez"
+    assert name("jane@example.com\nJane Doe") == "Jane Doe"
+
+
+def test_extract_skills_section_and_known():
+    text = "\n".join(["Jane Doe", "Key Skills", "Excel, SQL (advanced); Stakeholder management | CI/CD",
+                       "Experience", "Built dashboards in Tableau and Python"])
+    skills = core.extract_profile(text, ["Excel", "SQL", "Python", "Tableau", "R"])["skills"]
+    assert skills[:4] == ["Excel", "SQL", "Python", "Tableau"], skills
+    assert skills[4:] == ["Stakeholder management", "CI/CD"], skills
+    assert not any("dashboards" in s for s in skills)
+
+
+def test_extract_skills_drops_sentences():
+    text = "Skills\nCommunicating clearly with executives across the business, Excel"
+    assert core.extract_profile(text)["skills"] == ["Excel"]
+
+
+def test_has_term_symbols():
+    assert core.has_term("We use C++ and Node.js daily", "C++")
+    assert core.has_term("a .NET dev", ".NET")
+    assert core.has_term("Experience with SQL.", "SQL")
+    assert not core.has_term("We use C# and .NET", "C")
+    assert not core.has_term("MySQL database", "SQL")
+    assert not core.has_term("ASP.NET", ".NET")
+
+
+def test_known_skills_default_empty():
+    text = "Care Assistant\nSkills\nFirst aid, Safeguarding\nExperience\nMedication administration and Excel"
+    assert core.extract_profile(text)["skills"] == ["First aid", "Safeguarding"]
+    skills = core.extract_profile(text, ["Medication administration"])["skills"]
+    assert skills == ["Medication administration", "First aid", "Safeguarding"], skills
+
+
+def test_dedupe_skills():
+    assert core.dedupe_skills(["SQL", "sql", " Excel ", "", "excel"]) == ["SQL", "Excel"]
+
+
+def test_merge_profile_fills_only_empty():
+    current = {"name": "Janet D", "email": "", "phone": " ", "linkedin": "", "skills": ["sql"]}
+    extracted = {"name": "Jane Doe", "email": "jane@example.com", "phone": "07700 900123",
+                 "linkedin": "", "skills": ["SQL", "Excel"]}
+    before = (dict(current, skills=list(current["skills"])), dict(extracted, skills=list(extracted["skills"])))
+    out = core.merge_profile(current, extracted)
+    assert out == {"name": "Janet D", "email": "jane@example.com", "phone": "07700 900123",
+                   "linkedin": "", "skills": ["sql", "Excel"]}
+    assert (current, extracted) == before
+
+
+def test_extract_profile_adversarial_fast():
+    start = time.time()
+    core.extract_profile("+44 (0) 1-2.3 @a.b linkedin.com/in/ " * (200000 // 37))
+    assert time.time() - start < 2
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
