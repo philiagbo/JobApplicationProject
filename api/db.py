@@ -10,12 +10,14 @@ import core
 
 DEFAULTS = {
     "career_fields": [],
+    "known_skills": [],
     "excluded_words": [],
     "min_salary": 0,
     "location": "",
     "reed_api_key": "",
     "gmail_poll_minutes": 5,
     "api_poll_minutes": 60,
+    "cover_letter_template": "",
 }
 
 SCHEMA = """
@@ -83,8 +85,8 @@ def get_settings(conn) -> dict:
     return out
 
 
-def _clean(key, value):
-    default = DEFAULTS[key]
+def _clean(key, value, defaults=DEFAULTS):
+    default = defaults[key]
     if isinstance(default, list):
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ValueError("%s must be a list of strings" % key)
@@ -120,12 +122,14 @@ def job_dict(row) -> dict:
     return d
 
 
-def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
+def insert_jobs(conn, jobs: List[dict], settings: dict, profile: Optional[dict] = None) -> int:
+    if profile is None:
+        profile = get_profile(conn)
     new = 0
     with conn:
         for job in jobs:
             summary = core.summarize(job)
-            total, pros, cons = core.score(dict(job, summary=summary), settings)
+            total, pros, cons = core.score(dict(job, summary=summary), settings, profile)
             cur = conn.execute(
                 "INSERT OR IGNORE INTO jobs (url, source, title, company, location, salary, description,"
                 " summary, score, pros, cons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -136,6 +140,13 @@ def insert_jobs(conn, jobs: List[dict], settings: dict) -> int:
             if cur.rowcount == 1:
                 new += 1
     return new
+
+
+def get_job(conn, job_id: int) -> dict:
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise KeyError(job_id)
+    return job_dict(row)
 
 
 def list_jobs(conn, status: str = "new") -> List[dict]:
@@ -160,10 +171,12 @@ def stats(conn) -> dict:
     return out
 
 
-def rescore_new(conn, settings: dict) -> None:
+def rescore_new(conn, settings: dict, profile: Optional[dict] = None) -> None:
+    if profile is None:
+        profile = get_profile(conn)
     with conn:
         for row in conn.execute("SELECT * FROM jobs WHERE status = 'new'").fetchall():
-            total, pros, cons = core.score(job_dict(row), settings)
+            total, pros, cons = core.score(job_dict(row), settings, profile)
             conn.execute("UPDATE jobs SET score = ?, pros = ?, cons = ? WHERE id = ?",
                          (total, json.dumps(pros), json.dumps(cons), row["id"]))
 
@@ -295,3 +308,49 @@ def delete_answer(conn, answer_id: int) -> None:
 
 def find_answer(conn, label: str, options: Optional[List[str]] = None) -> Optional[dict]:
     return core.find_answer(label, list_answers(conn), options)
+
+
+# --- profile and stored CV --------------------------------------------------
+
+PROFILE_DEFAULTS = {"name": "", "email": "", "phone": "", "linkedin": "", "skills": []}
+
+
+def get_profile(conn) -> dict:
+    out = copy.deepcopy(PROFILE_DEFAULTS)
+    row = conn.execute("SELECT value FROM settings WHERE key = 'profile'").fetchone()
+    if row:
+        out.update({k: v for k, v in json.loads(row["value"]).items() if k in PROFILE_DEFAULTS})
+    return out
+
+
+def save_profile(conn, changes) -> dict:
+    if not isinstance(changes, dict):
+        raise ValueError("Profile must be a JSON object")
+    for key in changes:
+        if key not in PROFILE_DEFAULTS:
+            raise ValueError("Unknown profile field: %s" % key)
+    merged = dict(get_profile(conn), **{k: _clean(k, v, PROFILE_DEFAULTS) for k, v in changes.items()})
+    merged["skills"] = core.dedupe_skills(merged["skills"])
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('profile', ?)", (json.dumps(merged),))
+    return merged
+
+
+def cv_dir() -> Path:
+    return Path(db_path()).parent
+
+
+def cv_file_name() -> str:
+    return next((n for n in ("cv.pdf", "cv.docx") if (cv_dir() / n).is_file()), "")
+
+
+def store_cv(data: bytes, ext: str) -> None:
+    """Keep one CV under a fixed name (D-03); the name never comes from the client."""
+    d = cv_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / ("cv." + ext + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(str(tmp), str(d / ("cv." + ext)))  # atomic: an interrupted upload never leaves half a file
+    for other in ("pdf", "docx"):
+        if other != ext:
+            (d / ("cv." + other)).unlink(missing_ok=True)

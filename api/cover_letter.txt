@@ -1,0 +1,10 @@
+Dear Hiring Manager,
+
+I am writing to apply for the {job_title} role at {company}. My background in {top_skills} fits what you are looking for, and I would welcome the chance to bring it to your team.
+
+I would be glad to talk through my experience in more detail. You can reach me on {phone} or at {email}.
+
+Kind regards,
+{name}
+
+{date}
