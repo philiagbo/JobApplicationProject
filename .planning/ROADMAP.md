@@ -101,7 +101,22 @@ Plans:
   3. `fetch_details` returns the full description from the page's JSON-LD `JobPosting` block, or the largest text block when there is none
   4. When a page is blocked, it is retried once in Playwright and then marked "open listing to read", and no CAPTCHA is ever attempted
 
-**Plans**: TBD
+**Plans:** 6 plans
+
+Plans:
+**Wave 1**
+- [ ] 04-01-PLAN.md — Package-legitimacy checkpoint (human-action, blocking-human), then pin and install beautifulsoup4, keyring and playwright <1.61 (wave 1, checkpoint)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-02-PLAN.md — Tracer: PUT /api/gmail (App Password in keyring) to the Gmail tick to read-only IMAP to an alert job in GET /api/jobs; /api/gmail contract; IMAP, SINCE, zero-job warning and Gmail cadence rules; Gmail-only manual fetch (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-03-PLAN.md — D-17 one-way go/hold checkpoint, then tracer: details_status migration to the details worker to JSON-LD fetch to a re-scored job in GET /api/jobs; extraction, blocked, skip and save rules (wave 3, checkpoint)
+- [ ] 04-04-PLAN.md — Human exports one real alert per site, executor decodes and scrubs into api/samples/, human finishes the redaction (wave 3, checkpoints)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 04-05-PLAN.md — Tracer: LinkedIn sample through fake IMAP to GET /api/jobs; Indeed, CV-Library and Totaljobs parsers test-first against their samples; live Gmail human check (wave 4, human gate)
+- [ ] 04-06-PLAN.md — Tracer: single Playwright browser thread (queue.Queue) retries a page urllib cannot read, with real Chrome; browser rules locked with fakes (wave 4)
 
 ### Phase 5: Autofill Worker
 
