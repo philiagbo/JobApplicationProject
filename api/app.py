@@ -3,12 +3,15 @@ import sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import keyring.errors
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
+import alerts
 import core
 import cv
 import db
+import sources
 import watcher
 
 STATIC = Path(__file__).parent / "static"
@@ -108,7 +111,7 @@ def stats_get():
 def fetch_now():
     conn = get_db()
     settings = db.get_settings(conn)
-    if not settings["career_fields"]:
+    if not settings["career_fields"] and not watcher.gmail_account(conn):  # Gmail alone is enough (D-04)
         return jsonify(error="Choose at least one career field in settings"), 400
     if not watcher.FETCH_LOCK.acquire(blocking=False):
         return jsonify(error="Fetch already running"), 409
@@ -125,6 +128,60 @@ def fetch_now():
 def watcher_status():
     # in-memory status only: never reads settings, so it cannot return a saved key
     return jsonify(watcher.status())
+
+
+@app.errorhandler(keyring.errors.KeyringError)
+def _store_down(e):
+    return jsonify(error="Could not use the system credential store: %s: %s" % (type(e).__name__, e)), 503
+
+
+@app.get("/api/gmail")
+def gmail_get():
+    address = db.get_raw(get_db(), "gmail_address") or ""
+    if not address:
+        return jsonify(address="", connected=False)
+    return jsonify(address=address, connected=alerts.gmail_password(address) is not None)
+
+
+@app.put("/api/gmail")
+def gmail_put():
+    body = request.get_json(silent=True)
+    if not (isinstance(body, dict) and set(body) == {"address", "app_password"}
+            and all(isinstance(v, str) for v in body.values())):
+        return jsonify(error="Send address and app_password"), 400
+    address = body["address"]
+    if "@" not in address or len(address) > 254 or not address.isascii() or address != "".join(address.split()):
+        return jsonify(error="Enter your Gmail address"), 400
+    password = "".join(body["app_password"].split())  # Google shows the App Password in four groups
+    if not password or len(password) > 64 or not password.isascii():
+        return jsonify(error="Paste the Google App Password (letters only, spaces are fine)"), 400
+    try:
+        alerts.gmail_login(address, password).logout()  # test the login before anything is stored
+    except alerts.GmailAuthError as e:
+        return jsonify(error=str(e)), 400
+    except sources.SourceError as e:
+        return jsonify(error=str(e)), 502
+    conn = get_db()
+    old = db.get_raw(conn, "gmail_address")
+    alerts.store_password(address, password)
+    if old and old != address:
+        alerts.forget_password(old)
+    db.set_raw(conn, "gmail_address", address)
+    if old != address:
+        db.set_raw(conn, "gmail_last_poll", None)  # a new account starts with the 7-day lookback
+    watcher.GMAIL_WAKE.set()  # not WAKE: that would trigger an unwanted API poll
+    return jsonify(address=address, connected=True)
+
+
+@app.delete("/api/gmail")
+def gmail_delete():
+    conn = get_db()
+    address = db.get_raw(conn, "gmail_address")
+    if address:
+        alerts.forget_password(address)
+    db.set_raw(conn, "gmail_address", None)
+    db.set_raw(conn, "gmail_last_poll", None)
+    return jsonify(address="", connected=False)
 
 
 @app.get("/api/jobs")

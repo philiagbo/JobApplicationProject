@@ -115,6 +115,20 @@ def save_settings(conn, changes) -> None:
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
 
+def get_raw(conn, key: str) -> Optional[str]:
+    # raw rows (not in DEFAULTS) like the profile row: get_settings never returns them, save_settings rejects them
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_raw(conn, key: str, value: Optional[str]) -> None:
+    with conn:
+        if value is None:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        else:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+
 def job_dict(row) -> dict:
     d = dict(row)
     for key in ("summary", "pros", "cons"):

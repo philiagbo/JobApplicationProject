@@ -1,8 +1,10 @@
 import datetime
 import difflib
 import html
+import ipaddress
 import re
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 BASE_SCORE = 50
 TITLE_POINTS = 15
@@ -33,6 +35,37 @@ def _text_lines(html_or_text: str) -> List[str]:
             ln = "• " + ln[1:].strip()
         lines.append(ln)
     return lines
+
+
+def plain_text(html_or_text: str) -> str:
+    return "\n".join(_text_lines(html_or_text))
+
+
+# ponytail: tests flip this to reach a loopback fixture server
+ALLOW_PRIVATE_HOSTS = False
+
+
+def http_url(url) -> bool:
+    """True for an http(s) link to a public host; mail links must never point the app at local files or the LAN."""
+    if not isinstance(url, str):
+        return False
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    if parts.scheme.lower() not in ("http", "https") or not host:
+        return False
+    if ALLOW_PRIVATE_HOSTS:
+        return True
+    if host == "localhost" or host.endswith(".localhost"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # ponytail: no DNS resolution, so a public name pointing at a private address is not caught; local single-user app
+        return True
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
 # --- salary -----------------------------------------------------------------
