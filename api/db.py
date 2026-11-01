@@ -74,6 +74,9 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with closing(connect()) as conn:
         conn.executescript(SCHEMA)
+        if "details_status" not in [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]:
+            with conn:  # D-17: the one definition of the column; legacy rows start 'pending' too
+                conn.execute("ALTER TABLE jobs ADD COLUMN details_status TEXT NOT NULL DEFAULT 'pending'")
         seed_answers(conn)
 
 
@@ -193,6 +196,35 @@ def rescore_new(conn, settings: dict, profile: Optional[dict] = None) -> None:
             total, pros, cons = core.score(job_dict(row), settings, profile)
             conn.execute("UPDATE jobs SET score = ?, pros = ?, cons = ? WHERE id = ?",
                          (total, json.dumps(pros), json.dumps(cons), row["id"]))
+
+
+DETAILS_STATUSES = ("pending", "ok", "blocked", "skipped")
+
+
+def next_pending(conn) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM jobs WHERE details_status = 'pending' AND status != 'dismissed'"
+                       " ORDER BY score DESC, id DESC LIMIT 1").fetchone()
+    return job_dict(row) if row else None
+
+
+def save_details(conn, job_id: int, text: str, status: str) -> None:
+    if status not in DETAILS_STATUSES[1:]:
+        raise ValueError("Unknown details status: %s" % status)
+    with conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return
+        if not (status == "ok" and len(text) > len(core.plain_text(row["description"]))):
+            conn.execute("UPDATE jobs SET details_status = ? WHERE id = ?", (status, job_id))
+            return
+        old = json.loads(row["summary"])  # source hints (Remotive "Remote") are not columns; keep them (Pitfall 3)
+        job = dict(job_dict(row), description=text, job_type=old.get("job_type"), remote=old.get("remote"))
+        summary = core.summarize(job)
+        total, pros, cons = core.score(dict(job, summary=summary), get_settings(conn), get_profile(conn))
+        conn.execute("UPDATE jobs SET description = ?, details_status = ? WHERE id = ?", (text, status, job_id))
+        # same statement checks status, so a dismiss/queue racing this save never gets re-scored (D-13)
+        conn.execute("UPDATE jobs SET summary = ?, score = ?, pros = ?, cons = ? WHERE id = ? AND status = 'new'",
+                     (json.dumps(summary), total, json.dumps(pros), json.dumps(cons), job_id))
 
 
 STATUSES = ("new", "dismissed", "queued", "filling", "ready", "needs_input", "applied", "skipped")

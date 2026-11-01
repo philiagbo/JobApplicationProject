@@ -118,6 +118,27 @@ def _parse_salary(text: str, require_symbol: bool) -> Optional[Tuple[str, int, O
     return None
 
 
+NEVER_FETCH_SOURCES = ("linkedin", "indeed")  # D-18: never automate these sites
+NEVER_FETCH_DOMAINS = ("linkedin.com", "indeed.com")
+SHORT_DESCRIPTION_CHARS = 500
+
+
+def details_plan(job: dict, settings: dict) -> str:
+    """No-network decision for the details worker: "skipped", "ok" (already long enough) or "fetch"."""
+    try:
+        host = (urlsplit(job.get("url") or "").hostname or "").lower()
+    except ValueError:
+        host = ""
+    if job.get("source") in NEVER_FETCH_SOURCES or any(host == d or host.endswith("." + d) for d in NEVER_FETCH_DOMAINS):
+        return "skipped"
+    title = " %s " % normalise(job.get("title") or "")
+    if any(normalise(w) and " %s " % normalise(w) in title for w in settings.get("excluded_words", [])):
+        return "skipped"
+    if len(plain_text(job.get("description") or "")) >= SHORT_DESCRIPTION_CHARS:
+        return "ok"
+    return "fetch"
+
+
 # --- type / remote / years / bullets ---------------------------------------
 
 # ponytail: keyword guesses, first hit wins; "not a remote job" still reads as Remote. Source fields beat these.

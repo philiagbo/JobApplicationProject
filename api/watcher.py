@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import keyring.errors
 
 import alerts
+import core
 import db
 import sources
 
@@ -24,6 +25,10 @@ TICK_SECONDS = 30
 SECONDS_PER_MINUTE = 60
 RETRY_SECONDS = 300  # a poll with errors is retried this soon, not after a full api_poll_minutes
 _thread = None  # type: Optional[threading.Thread]
+DETAILS_WAKE = threading.Event()  # set when new jobs arrive so the details worker does not wait out its idle sleep
+DETAILS_GAP_SECONDS = 5  # D-11: fixed, one real fetch every 5 seconds
+DETAILS_IDLE_SECONDS = 30
+_details_thread = None  # type: Optional[threading.Thread]
 
 
 def _now() -> str:
@@ -78,6 +83,8 @@ def run_fetch(conn, settings, names=ALL_SOURCES):
         try:
             jobs = call(warnings.append)  # can take minutes; settings may be saved meanwhile
             counts[name] = db.insert_jobs(conn, jobs, db.get_settings(conn))  # so score with the latest
+            if counts[name]:
+                DETAILS_WAKE.set()
             error = None
         except sources.SourceError as e:
             error = str(e)
@@ -150,11 +157,51 @@ def _loop():
             WAKE.wait(TICK_SECONDS)  # ponytail: GMAIL_WAKE is noticed on the next 30-second pass
 
 
+def _details_step() -> Optional[bool]:
+    """None = nothing pending, False = decided with no network, True = fetched (or failed trying)."""
+    conn = db.connect()
+    try:
+        job = db.next_pending(conn)
+        if job is None:
+            return None
+        try:
+            plan = core.details_plan(job, db.get_settings(conn))
+            if plan != "fetch":
+                db.save_details(conn, job["id"], "", plan)
+                return False
+            text, status = sources.fetch_details(job["url"])
+            db.save_details(conn, job["id"], text, status)
+        except Exception:  # a bad row is marked blocked so the loop can never spin on it; SystemExit leaves it pending
+            log.exception("Details fetch failed for job %s", job["id"])
+            db.save_details(conn, job["id"], "", "blocked")
+        return True
+    finally:
+        conn.close()
+
+
+def _details_loop():
+    while True:
+        DETAILS_WAKE.clear()
+        try:
+            worked = _details_step()
+        except Exception:
+            log.exception("Details step failed")
+            time.sleep(DETAILS_IDLE_SECONDS)
+            continue
+        if worked is None:
+            DETAILS_WAKE.wait(DETAILS_IDLE_SECONDS)
+        elif worked:
+            time.sleep(DETAILS_GAP_SECONDS)  # only after a real fetch
+
+
 def start() -> None:
-    global _thread
+    global _thread, _details_thread
     if _thread is None or not _thread.is_alive():
         _thread = threading.Thread(target=_loop, name="watcher", daemon=True)
         _thread.start()
+    if _details_thread is None or not _details_thread.is_alive():
+        _details_thread = threading.Thread(target=_details_loop, name="details", daemon=True)
+        _details_thread.start()
 
 
 def status() -> dict:

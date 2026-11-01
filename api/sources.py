@@ -1,10 +1,16 @@
 import base64
+import html
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode
+
+from bs4 import BeautifulSoup, NavigableString
+
+import core
 
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
 REED_URL = "https://www.reed.co.uk/api/1.0/search"
@@ -104,3 +110,114 @@ def fetch_reed(fields: List[str], api_key: str, location: str = "", min_salary: 
         raise SourceError("Reed fetch failed: %s" % e)
     # ponytail: the same ad on two sources is not merged; dedupe is by URL only
     return list(found.values())
+
+
+# --- full job description from the posting page (DETAIL-01, D-16) -------------
+
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+BLOCKED_TEXT_CHARS = 200
+BLOCKED_STATUSES = (403, 429, 503)
+CHALLENGE_PHRASES = ("captcha", "verify you are human", "are you a robot", "just a moment",
+                     "checking your browser", "unusual traffic", "access denied")
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    # urllib would follow a redirect to ftp:// (or a LAN host) on its own; refuse anything http_url refuses
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not core.http_url(newurl):
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def get_page(url: str) -> Tuple[int, str]:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})  # no Accept-Encoding: urllib cannot gunzip
+    try:
+        with urllib.request.build_opener(_SafeRedirect).open(req, timeout=20) as resp:
+            if not core.http_url(resp.geturl()):
+                return 0, ""
+            raw = resp.read(MAX_PAGE_BYTES)
+            try:
+                return resp.status, raw.decode(resp.headers.get_content_charset() or "utf-8", errors="replace")
+            except LookupError:  # unknown charset name
+                return resp.status, raw.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, ""
+
+
+def _jobpostings(data, found: list) -> None:
+    """Collect each JobPosting's description ("" when it has none) from a parsed JSON-LD value."""
+    if isinstance(data, list):
+        for x in data:
+            _jobpostings(x, found)
+    elif isinstance(data, dict):
+        t = data.get("@type")
+        if "JobPosting" in (t if isinstance(t, list) else [t]):
+            d = data.get("description")
+            found.append(d if isinstance(d, str) else "")
+        for key in ("@graph", "mainEntity"):
+            if key in data:
+                _jobpostings(data[key], found)
+
+
+def _block_text(el) -> str:
+    parts = []
+    for c in el.children:
+        if type(c) is NavigableString:
+            if c.strip():
+                parts.append(c.strip())
+        elif c.name == "p":
+            parts.append(c.get_text(" ", strip=True))
+        elif c.name == "li":
+            parts.append("• " + c.get_text(" ", strip=True))
+        elif c.name in ("ul", "ol"):
+            parts += ["• " + li.get_text(" ", strip=True) for li in c.find_all("li", recursive=False)]
+    return "\n".join(p for p in parts if p)
+
+
+def extract_description(doc: str) -> Tuple[str, bool, bool]:
+    """(plain text, came from a JobPosting description, a JobPosting block exists)."""
+    soup = BeautifulSoup(doc or "", "html.parser")
+    found = []  # type: list
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            _jobpostings(json.loads(tag.get_text(), strict=False), found)  # strict=False: raw newlines are common
+        except ValueError:
+            continue
+    for raw in found:
+        text = core.plain_text(html.unescape(raw))  # unescape first to expose the tags, then strip them
+        if text:
+            return text, True, True
+    for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg"]):
+        tag.decompose()
+    # direct children only: scoring recursive text would always pick <body>
+    best = max((_block_text(el) for el in soup.find_all(["div", "section", "article", "main", "ul", "body"])),
+               key=len, default="")
+    return best, False, bool(found)
+
+
+def judge_page(code: int, doc: str) -> Optional[str]:
+    """The readable description, or None when the page is blocked (D-16)."""
+    if code in BLOCKED_STATUSES:
+        return None
+    text, _, has_jobposting = extract_description(doc)
+    if not has_jobposting:  # a real posting page often mentions reCAPTCHA in a footer: only judge pages with no JobPosting
+        soup = BeautifulSoup(doc or "", "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        visible = soup.get_text(" ").lower()  # includes the <title>
+        if any(p in visible for p in CHALLENGE_PHRASES):
+            return None
+    return text if len(text) >= BLOCKED_TEXT_CHARS else None
+
+
+def fetch_details(url: str) -> Tuple[str, str]:
+    """("text", "ok") or ("", "blocked"); never raises on network trouble."""
+    if not core.http_url(url):
+        return "", "blocked"
+    try:
+        code, doc = get_page(url)
+    except (OSError, ValueError):
+        # ponytail: a fetch that fails while offline is final (blocked); set details_status back to 'pending' to retry
+        code, doc = 0, ""
+    text = judge_page(code, doc)
+    return (text, "ok") if text is not None else ("", "blocked")  # 04-06: one Playwright retry goes here

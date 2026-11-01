@@ -17,6 +17,8 @@ import watcher  # noqa: E402
 
 sources.REMOTIVE_GAP_SECONDS = 0
 watcher.TICK_SECONDS = 0.05
+watcher.DETAILS_GAP_SECONDS = 0
+watcher.DETAILS_IDLE_SECONDS = 0.05
 
 calls = []  # (url, params, headers)
 FAIL = set()  # URL substrings that raise OSError
@@ -44,10 +46,18 @@ def fake_get_json(url, params, headers=None):
 sources.get_json = fake_get_json
 
 
+def offline_page(url):
+    raise OSError("offline in tests")  # no test may reach a real job site
+
+
+sources.get_page = offline_page
+
+
 def fresh():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
     sources.get_json = fake_get_json  # re-install: another test module may have swapped it
+    sources.get_page = offline_page
     del calls[:]
     FAIL.clear()
     watcher.STATUS.clear()
@@ -60,7 +70,7 @@ def save(**changes):
 
 
 def test_import_does_not_start_watcher():
-    assert watcher._thread is None
+    assert watcher._thread is None and watcher._details_thread is None
 
 
 class Records(logging.Handler):
@@ -324,6 +334,12 @@ def test_watcher_thread_end_to_end():
             time.sleep(0.05)
         assert reed, "no reed job appeared"
         assert len(failures) == 1
+        deadline = time.monotonic() + 15
+        while any(j["details_status"] == "pending" for j in reed) and time.monotonic() < deadline:
+            reed = [j for j in c.get("/api/jobs").get_json() if j["source"] == "reed"]
+            time.sleep(0.05)
+        assert len(reed) == 2 and all(j["details_status"] == "blocked" for j in reed)  # offline
+        assert watcher._details_thread.is_alive()
         assert watcher._thread.is_alive()
         st = watcher.status()
         assert st["running"] is True and st["sources"]["reed"]["ok"] is True
@@ -351,6 +367,15 @@ def test_watcher_thread_end_to_end():
         finally:
             watcher._tick = tick
             watcher._thread = None
+            step = watcher._details_step
+            watcher._details_step = lambda: sys.exit()
+            watcher.DETAILS_WAKE.set()
+            try:
+                watcher._details_thread.join(2)
+                assert not watcher._details_thread.is_alive()
+            finally:
+                watcher._details_step = step
+                watcher._details_thread = None
 
 
 if __name__ == "__main__":
