@@ -6,17 +6,20 @@ import imaplib
 import logging
 import os
 import re
+import socket
 import ssl
 import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from datetime import date, timedelta
 
 os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import keyring  # noqa: E402
+from bs4 import BeautifulSoup  # noqa: E402
 import keyring.backends.fail  # noqa: E402
 import keyring.errors  # noqa: E402
 from keyring.backend import KeyringBackend  # noqa: E402
@@ -56,6 +59,7 @@ import sources  # noqa: E402
 import watcher  # noqa: E402
 
 sources.REMOTIVE_GAP_SECONDS = 0
+REAL_ALERTS = dict(alerts.ALERTS)  # the registry as shipped; fresh() empties it so the older tests see only their test site
 
 SENDER = "alerts@board.example"
 PW = "abcdefghijklmnop"
@@ -158,7 +162,13 @@ def fresh():
     watcher.STATUS.clear()
     watcher.WAKE.clear()
     watcher.GMAIL_WAKE.clear()
+    alerts.ALERTS.clear()
     register_board()
+
+
+def real_sites():
+    alerts.ALERTS.clear()
+    alerts.ALERTS.update(REAL_ALERTS)
 
 
 def save(**changes):
@@ -634,6 +644,222 @@ def test_loop_keeps_gmail_alive():
     finally:
         watcher._tick, watcher._tick_gmail, watcher.TICK_SECONDS = real_tick, real_gmail, real_ticks
         watcher.log.disabled = False
+
+
+# --- 04-05: the person's real sample alerts ---------------------------------
+
+SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+JOB_KEYS = {"url", "source", "title", "company", "location", "salary", "description", "job_type", "remote"}
+SITES = {"linkedin", "indeed", "cv-library", "totaljobs"}  # job sources; Indeed and Totaljobs each have two senders
+
+
+def sample(name):
+    with open(os.path.join(SAMPLES, name + ".eml"), "rb") as f:
+        return f.read()
+
+
+def sample_body(name):
+    return alerts.email_body(email.message_from_bytes(sample(name), policy=email.policy.default))
+
+
+def sample_without_links(name):
+    soup = BeautifulSoup(sample_body(name), "html.parser")
+    for a in soup.find_all("a"):
+        a.decompose()
+    return str(soup)
+
+
+def check_sample(key, name, source, count, first, query=(), extra=None):
+    """The parser registered as `key` on sample `name`: the job count, the first job's fields, and the rules every job follows."""
+    jobs = REAL_ALERTS[key][2](sample_body(name))
+    assert len(jobs) == count, len(jobs)
+    for i, want in [(0, first)] + sorted((extra or {}).items()):
+        for field, value in want.items():
+            if field == "url_prefix":
+                assert jobs[i]["url"].startswith(value), jobs[i]["url"]
+            elif field == "description_has":
+                assert value in jobs[i]["description"], jobs[i]["description"]
+            else:
+                assert jobs[i][field] == value, (i, field, jobs[i][field])
+    urls = [j["url"] for j in jobs]
+    assert len(set(urls)) == len(urls)
+    for j in jobs:
+        assert set(j) == JOB_KEYS and j["source"] == source and j["title"]
+        assert "<" not in j["description"] and core.http_url(j["url"])
+        assert "utm_" not in j["url"] and "#" not in j["url"]
+        keys = {k for k, _ in urllib_parse_qsl(j["url"])}
+        assert keys <= set(query) or "/pagead/clk" in j["url"], keys  # sponsored Indeed links have no job ID to keep
+    return jobs
+
+
+def urllib_parse_qsl(url):
+    return alerts.parse_qsl(alerts.urlsplit(url).query)
+
+
+# Each site's expected first job comes from the sample's first card. Place names such as Sampletown and the REDACTED
+# tokens are redaction placeholders, so they are never asserted.
+
+def test_parse_linkedin_sample():
+    check_sample("linkedin", "linkedin", "linkedin", 6, dict(
+        url="https://www.linkedin.com/jobs/view/4479505277", title="Software Developer, Cerberus", company="bet365",
+        location="Manchester", salary="", remote="Hybrid", job_type=None),
+        extra={3: dict(url="https://www.linkedin.com/jobs/view/4477704384", title="Full Stack Engineer",
+                       company="Corecom Consulting", location="Manchester Area, United Kingdom",
+                       salary="£80K-£90K / year", remote="Remote")})
+
+
+def test_parse_indeed_sample():
+    jobs = check_sample("indeed", "indeed", "indeed", 29, dict(
+        url="https://uk.indeed.com/viewjob?jk=1e7d0d5a0b4b0a64", title="Inclusion Co-ordinator and Designated Safeguarding Lead (DSL) (7817)",
+        company="Hanson Academy", location="Bradford", salary="£46,579 - £50,908 a year"), query=("jk",),
+        extra={3: dict(title="Domestic Abuse Case Worker (Refuge based)", company="Staying Put", location="Bradford",
+                       salary="£27,554 - £28,735 a year", url_prefix="https://uk.indeed.com/pagead/clk/")})
+    # 30 cards in the sample: two sponsored links are identical once redacted, so they are one job here
+    assert sum("viewjob?jk=" in j["url"] for j in jobs) == 6
+
+
+def test_parse_indeed_match_sample():
+    check_sample("indeed-match", "indeed-match", "indeed", 1, dict(
+        url_prefix="https://cts.indeed.com/v3/", title="Employee Relations Specialist", company="BDS Northern",
+        location="Bradford", salary="£19.48 - £25.27 an hour", job_type="Temporary", remote="Hybrid",
+        description_has="strong understanding of UK employment law"))
+    job = alerts.parse_indeed_match(sample_body("indeed-match"))[0]
+    assert "Hi " not in job["description"] and "*About the role*" in job["description"]  # greeting dropped, preview kept
+
+
+def test_parse_cv_library_sample():
+    check_sample("cv-library", "cv-library", "cv-library", 10, dict(
+        url="https://www.cv-library.co.uk/job/212349846/Trainee-Mortgage-Advisor", title="Trainee Mortgage Advisor",
+        company="", location="Nationwide", salary="", description_has="passing CeMAP and becoming a mortgage adviser"))
+
+
+def test_parse_totaljobs_sample():
+    check_sample("totaljobs", "totaljobs", "totaljobs", 19, dict(
+        url="https://www.totaljobs.com/JobSearch/EmailLink.aspx?JobID=82529937", title="Associate IS Specialist/Information Services",
+        company="First Choice Corporate Ltd", location="Trafford Park, Manchester (M17)", salary="Negotiable"), query=("JobID",),
+        extra={10: dict(title="Design Specialist, Manchester", company="Bureau Veritas", salary="")})  # "Salary unspecified" is no salary
+
+
+def test_parse_totaljobs_invite_sample():
+    check_sample("totaljobs-invite", "totaljobs-invite", "totaljobs", 1, dict(
+        url_prefix="https://web.totaljobsmail.co.uk/", title="Support Coordinator", company="NFP People"))
+    assert alerts.parse_totaljobs_invite(sample_body("totaljobs-invite"))[0]["location"]
+
+
+# key -> (sample, URL rule): the four sites whose links carry a job ID
+MULTI = {"linkedin": ("linkedin", alerts._linkedin_url), "indeed": ("indeed", alerts._indeed_url),
+         "cv-library": ("cv-library", alerts._cv_url), "totaljobs": ("totaljobs", alerts._totaljobs_url)}
+ALL = [("linkedin", "linkedin"), ("indeed", "indeed"), ("indeed-match", "indeed-match"), ("cv-library", "cv-library"),
+       ("totaljobs", "totaljobs"), ("totaljobs-invite", "totaljobs-invite")]
+
+
+def test_parsers_collapse_duplicate_links():
+    for key, name in ALL:
+        parse = REAL_ALERTS[key][2]
+        before = parse(sample_body(name))
+        soup = BeautifulSoup(sample_body(name), "html.parser")
+        first = before[0]["title"]
+        a = next(a for a in soup.find_all("a", href=True) if first in " ".join(a.get_text().split()))
+        dup = soup.new_tag("a", href=a["href"] + ("&" if "?" in a["href"] else "?") + "utm_source=x&trk=y")
+        dup.string = "again"
+        a.insert_after(dup)
+        after = parse(str(soup))
+        assert [j["url"] for j in after] == [j["url"] for j in before], key
+
+
+def test_parsers_keep_document_order():
+    for key, (name, canon) in MULTI.items():
+        order = []
+        for a in BeautifulSoup(sample_body(name), "html.parser").find_all("a", href=True):
+            url = canon(a["href"]) if a.get_text(strip=True) else ""
+            if url and url not in order:
+                order.append(url)
+        got = [j["url"] for j in REAL_ALERTS[key][2](sample_body(name))]
+        assert got == order and len(got) > 1, key
+
+
+def test_parsers_empty_input():
+    for key, name in ALL:
+        parse = REAL_ALERTS[key][2]
+        assert parse("") == [], key
+        assert parse("<html><body><p>No jobs today</p></body></html>") == [], key
+        assert parse(sample_without_links(name)) == [], key
+
+
+def test_parsers_make_no_network_calls():
+    def boom(*a, **k):
+        raise AssertionError("network call")
+
+    real = urllib.request.urlopen, socket.create_connection
+    urllib.request.urlopen, socket.create_connection = boom, boom
+    try:
+        for key, name in ALL:
+            assert REAL_ALERTS[key][2](sample_body(name))
+    finally:
+        urllib.request.urlopen, socket.create_connection = real
+
+
+def test_alert_registry_matches_samples():
+    assert set(REAL_ALERTS) == {k for k, _ in ALL}
+    labels = {"linkedin": "LinkedIn", "indeed": "Indeed", "indeed-match": "Indeed", "cv-library": "CV-Library",
+              "totaljobs": "Totaljobs", "totaljobs-invite": "Totaljobs"}
+    for key, name in ALL:
+        label, senders, parse = REAL_ALERTS[key]
+        sent_from = email.utils.parseaddr(str(email.message_from_bytes(sample(name))["From"]))[1]
+        assert label == labels[key] and sent_from in senders and all("@" in x for x in senders), key
+        assert {j["source"] for j in parse(sample_body(name))} <= SITES
+
+
+def test_linkedin_sample_end_to_end():
+    fresh()
+    real_sites()
+    c = app.app.test_client()
+    connect_gmail(c)
+    FakeIMAP.MAILBOX = [sample("linkedin")]
+    assert isinstance(watcher._tick_gmail(None), float)
+    got = [j for j in jobs(c) if j["source"] == "linkedin"]
+    assert len(got) == 6
+    first = next(j for j in got if j["title"] == "Software Developer, Cerberus")
+    assert first["company"] == "bet365" and first["url"] == "https://www.linkedin.com/jobs/view/4479505277"
+    assert all(j["url"].startswith("https://www.linkedin.com/jobs/view/") and "?" not in j["url"] for j in got)
+    st = watcher.STATUS["gmail"]
+    assert st["ok"] is True and st["error"] is None
+
+
+def test_six_sample_poll_end_to_end():
+    fresh()
+    real_sites()
+    c = app.app.test_client()
+    connect_gmail(c)
+    FakeIMAP.MAILBOX = [sample(name) for _, name in ALL]
+    watcher._tick_gmail(None)
+    got = jobs(c)
+    assert {j["source"] for j in got} == SITES and len(got) == 6 + 29 + 1 + 10 + 19 + 1
+    st = watcher.STATUS["gmail"]
+    assert st["ok"] is True and st["error"] is None and st["new"] == len(got)
+    watcher._tick_gmail(None)  # same mailbox again: same URLs, no new rows
+    assert watcher.STATUS["gmail"]["new"] == 0 and len(jobs(c)) == len(got)
+
+
+def test_format_change_warns():
+    fresh()
+    real_sites()
+
+    def stripped(name):
+        m = email.message_from_bytes(sample(name), policy=email.policy.default)
+        m.set_content(sample_without_links(name), subtype="html")  # same From, no job links
+        return m.as_bytes()
+
+    c = app.app.test_client()
+    connect_gmail(c)
+    FakeIMAP.MAILBOX = [stripped("indeed"), sample("linkedin"), sample("cv-library"), sample("totaljobs")]
+    watcher._tick_gmail(None)
+    st = watcher.STATUS["gmail"]
+    assert st["error"] == "Indeed alert parsed 0 jobs — format may have changed"
+    assert {j["source"] for j in jobs(c)} == {"linkedin", "cv-library", "totaljobs"}
+    FakeIMAP.MAILBOX = [stripped("indeed"), stripped("indeed-match")]  # both Indeed senders: still one warning
+    watcher._tick_gmail(None)
+    assert watcher.STATUS["gmail"]["error"] == "Indeed alert parsed 0 jobs — format may have changed"
 
 
 if __name__ == "__main__":
