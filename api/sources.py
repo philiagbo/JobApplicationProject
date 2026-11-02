@@ -1,4 +1,5 @@
 import base64
+import concurrent.futures
 import html
 import json
 import threading
@@ -10,6 +11,7 @@ from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup, NavigableString
 
+import browser
 import core
 
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
@@ -220,4 +222,10 @@ def fetch_details(url: str) -> Tuple[str, str]:
         # ponytail: a fetch that fails while offline is final (blocked); set details_status back to 'pending' to retry
         code, doc = 0, ""
     text = judge_page(code, doc)
-    return (text, "ok") if text is not None else ("", "blocked")  # 04-06: one Playwright retry goes here
+    if text is None:  # DETAIL-02: one retry in the real browser, then blocked
+        try:
+            code, doc = browser.fetch_page(url)
+        except (browser.BrowserUnavailable, browser.Error, concurrent.futures.TimeoutError, OSError):
+            return "", "blocked"
+        text = judge_page(code, doc)
+    return (text, "ok") if text is not None else ("", "blocked")

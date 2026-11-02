@@ -11,6 +11,7 @@ os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import app  # noqa: E402
+import browser  # noqa: E402
 import db  # noqa: E402
 import sources  # noqa: E402
 import watcher  # noqa: E402
@@ -53,11 +54,19 @@ def offline_page(url):
 sources.get_page = offline_page
 
 
+def no_browser(url):
+    raise browser.BrowserUnavailable("no browser in tests")  # the details thread must never start a real browser
+
+
+browser.fetch_page = no_browser
+
+
 def fresh():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
     sources.get_json = fake_get_json  # re-install: another test module may have swapped it
     sources.get_page = offline_page
+    browser.fetch_page = no_browser
     del calls[:]
     FAIL.clear()
     watcher.STATUS.clear()

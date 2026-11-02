@@ -5,21 +5,34 @@ import http.server
 import json
 import logging
 import os
+import queue
 import sqlite3
 import sys
 import tempfile
 import threading
+import concurrent.futures
+import subprocess
 
 os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import app  # noqa: E402
+import browser  # noqa: E402
 import core  # noqa: E402
 import db  # noqa: E402
 import sources  # noqa: E402
 import watcher  # noqa: E402
 
 REAL_GET_PAGE = sources.get_page
+REAL_FETCH_PAGE = browser.fetch_page
+REAL_START = browser._start_playwright
+
+
+def no_browser(url):
+    raise browser.BrowserUnavailable("no browser in tests")  # only the live and fake-based tests may reach a browser
+
+
+browser.fetch_page = no_browser
 core.ALLOW_PRIVATE_HOSTS = True  # the fixture server is on loopback
 watcher.DETAILS_GAP_SECONDS = 0
 watcher.DETAILS_IDLE_SECONDS = 0.05
@@ -73,14 +86,25 @@ POSTING_HTML = (
 POSTING_PAGE = ldpage(json.dumps(jobposting(html.escape(POSTING_HTML))).replace("\\n", "\n"))
 assert len(POSTING_HTML) > 500 and "\n" in POSTING_PAGE.split('">', 1)[1]
 serve("/posting", POSTING_PAGE)
+JS_TEXT = "Analyst role. " + "You will build weekly reports and help the team choose what to measure next. " * 5
+serve("/js", '<html><body><main id="m"></main><script>document.getElementById("m").innerHTML = "<p>%s</p>";</script></body></html>' % JS_TEXT)
+serve("/403", "<html><body><p>%s</p></body></html>" % ("Access to this page is forbidden for your client. " * 8), status=403)
 
 
 def fresh():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
     sources.get_page = REAL_GET_PAGE
+    browser.fetch_page = no_browser
     COUNTS.clear()
     core.ALLOW_PRIVATE_HOSTS = True
+
+
+def reset_browser(start):
+    browser._thread = None  # an old thread keeps waiting on its old queue and is harmless
+    browser._q = queue.Queue()
+    browser._unavailable = None
+    browser._start_playwright = start
 
 
 def job(url, source="reed", title="Data Analyst", description="analyse data", **extra):
@@ -457,6 +481,240 @@ def test_details_start_once():
             first.join(2)
             watcher_thread.join(2)
             watcher._details_thread = watcher._thread = None
+
+
+def test_browser_retry_live():
+    fresh()
+    reset_browser(REAL_START)
+    browser.fetch_page = REAL_FETCH_PAGE
+    try:
+        try:
+            browser.fetch_page(BASE + "/posting")
+        except browser.BrowserUnavailable as e:
+            print("live browser: skipped (%s)" % e)
+            return
+        COUNTS.clear()
+        js_id, forbidden_id = job(BASE + "/js", description="short"), job(BASE + "/403", description="short")
+        watcher._details_step()
+        watcher._details_step()
+        got_js, got_403 = get(js_id), get(forbidden_id)
+        assert got_js["details_status"] == "ok" and "Analyst role." in got_js["description"], got_js
+        assert got_403["details_status"] == "blocked" and got_403["description"] == "short"
+        assert COUNTS["/js"] == 2 and COUNTS["/403"] == 2  # one urllib request plus one browser request each
+        print("live browser: ok")
+    finally:
+        reset_browser(REAL_START)
+
+
+class FakeResponse:
+    def __init__(self, status):
+        self.status = status
+
+
+class FakePage:
+    def __init__(self, status=200, content="<html>page</html>", url=None, goto_error=None):
+        self.calls, self.status, self.html, self.after, self.goto_error, self.url = [], status, content, url, goto_error, ""
+
+    def goto(self, url, **kw):
+        self.calls.append(("goto", (url,), kw))
+        if self.goto_error:
+            raise self.goto_error
+        self.url = self.after or url
+        return FakeResponse(self.status)
+
+    def wait_for_load_state(self, *a, **kw):
+        self.calls.append(("wait_for_load_state", a, kw))
+
+    def content(self):
+        self.calls.append(("content", (), {}))
+        return self.html
+
+    def close(self):
+        self.calls.append(("close", (), {}))
+
+
+class FakeBrowser:
+    def __init__(self, page):
+        self.page, self.new_page_args, self.closed = page, None, False
+
+    def new_page(self, *a, **kw):
+        self.new_page_args = (a, kw)
+        return self.page
+
+    def close(self):
+        self.closed = True
+
+
+class FakeChromium:
+    def __init__(self, page=None, missing=()):
+        self.page, self.missing, self.launches, self.browsers = page or FakePage(), missing, [], []
+
+    def launch(self, **kw):
+        self.launches.append(kw)
+        if kw.get("channel") in self.missing:
+            raise browser.Error("Chromium distribution '%s' is not found" % kw.get("channel"))
+        self.browsers.append(FakeBrowser(self.page))
+        return self.browsers[-1]
+
+
+class FakePW:
+    def __init__(self, page=None, missing=()):
+        self.chromium = FakeChromium(page, missing)
+
+
+def test_browser_single_thread():
+    fresh()
+    starts = []
+    reset_browser(lambda: starts.append(1) or FakePW())
+    try:
+        who = lambda pw: (threading.current_thread().name, threading.get_ident())
+        got = [browser.submit(who).result(5)]
+        other = []
+        t = threading.Thread(target=lambda: other.append(browser.submit(who).result(5)))
+        t.start()
+        t.join(5)
+        got += other + [browser.submit(who).result(5)]
+        assert len(got) == 3 and {g[0] for g in got} == {"browser"} and len({g[1] for g in got}) == 1
+        assert got[0][1] != threading.get_ident() and starts == [1]
+    finally:
+        reset_browser(REAL_START)
+
+
+def test_browser_exception_through_future():
+    fresh()
+    reset_browser(lambda: FakePW())
+    try:
+        def boom(pw):
+            raise ValueError("boom")
+
+        raises(ValueError, browser.submit(boom).result, 5)
+        assert browser.submit(lambda pw: "still serving").result(5) == "still serving"
+    finally:
+        reset_browser(REAL_START)
+
+
+def test_browser_not_started_on_import():
+    code = ("import sys; sys.path.insert(0, %r)\nimport app, watcher, sources, browser, threading\n"
+            "print(browser._thread, sorted(t.name for t in threading.enumerate() if t.name in ('browser', 'details')))"
+            % os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, JOBHELPER_DB=os.path.join(tempfile.mkdtemp(), "i.db"))
+    out = subprocess.run([sys.executable, "-I", "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0 and out.stdout.strip() == "None []", out.stdout + out.stderr
+
+
+def test_playwright_start_failure():
+    fresh()
+
+    def no_driver():
+        raise RuntimeError("no driver")
+
+    reset_browser(no_driver)
+    browser.fetch_page = REAL_FETCH_PAGE
+    browser.log.disabled = True  # the expected failure is logged with a traceback
+    try:
+        raises(browser.BrowserUnavailable, browser.fetch_page, BASE + "/posting")
+        assert sources.fetch_details(BASE + "/403") == ("", "blocked")
+    finally:
+        browser.log.disabled = False
+        reset_browser(REAL_START)
+
+
+def test_channel_order_and_memo():
+    fresh()
+    reset_browser(REAL_START)
+    pw = FakePW(missing=("msedge",))
+    assert isinstance(browser.launch_headless(pw), FakeBrowser)
+    assert pw.chromium.launches == [{"channel": "msedge", "headless": True}, {"channel": "chrome", "headless": True}]
+    both = FakePW(missing=("msedge", "chrome"))
+    try:
+        browser.launch_headless(both)
+        raise AssertionError("BrowserUnavailable not raised")
+    except browser.BrowserUnavailable as e:
+        assert str(e) == "Edge or Chrome is not installed"
+    assert len(both.chromium.launches) == 2
+    raises(browser.BrowserUnavailable, browser.launch_headless, both)
+    assert len(both.chromium.launches) == 2  # remembered: no second probe
+    reset_browser(REAL_START)
+
+
+def test_page_task_only_reads():
+    fresh()
+    reset_browser(REAL_START)
+    page = FakePage(status=200, content="<html>hello</html>")
+    pw = FakePW(page)
+    assert browser._load_page(pw, BASE + "/x") == (200, "<html>hello</html>")
+    assert page.calls == [("goto", (BASE + "/x",), {"wait_until": "domcontentloaded", "timeout": 20000}),
+                          ("wait_for_load_state", ("networkidle",), {"timeout": 5000}),
+                          ("content", (), {}), ("close", (), {})]
+    assert pw.chromium.browsers[0].new_page_args == ((), {}) and pw.chromium.browsers[0].closed
+
+
+def test_page_closed_on_error():
+    fresh()
+    reset_browser(REAL_START)
+    page = FakePage(goto_error=browser.Error("timeout"))
+    pw = FakePW(page)
+    raises(browser.Error, browser._load_page, pw, BASE + "/x")
+    assert page.calls[-1][0] == "close" and pw.chromium.browsers[0].closed
+
+
+def test_post_navigation_url_checked():
+    fresh()
+    reset_browser(REAL_START)
+    page = FakePage(url="file:///etc/passwd", content="secret")
+    pw = FakePW(page)
+    assert browser._load_page(pw, BASE + "/x") == (0, "")
+    assert "content" not in [c[0] for c in page.calls] and pw.chromium.browsers[0].closed
+
+
+def test_fetch_details_retries_once():
+    fresh()
+    calls = []
+
+    def answer(result):
+        def fake(url):
+            calls.append(url)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return fake
+
+    sources.get_page = lambda url: (403, "")
+    posting = REAL_GET_PAGE(BASE + "/posting")[1]
+    browser.fetch_page = answer((200, posting))
+    text, status = sources.fetch_details("https://a.example/p")
+    assert status == "ok" and "Build dashboards" in text and calls == ["https://a.example/p"]
+    for result in ((403, ""), browser.BrowserUnavailable("x"), browser.Error("x"), concurrent.futures.TimeoutError(), OSError("x")):
+        del calls[:]
+        browser.fetch_page = answer(result)
+        assert sources.fetch_details("https://a.example/p") == ("", "blocked"), result
+        assert len(calls) == 1
+    del calls[:]
+    sources.get_page = REAL_GET_PAGE
+    browser.fetch_page = answer((200, ""))
+    assert sources.fetch_details(BASE + "/posting")[1] == "ok" and calls == []  # readable by urllib: no browser
+
+
+def test_browser_challenge_blocked():
+    fresh()
+    calls = []
+    page = "<html><body><p>%s Verify you are human</p></body></html>" % ("Please wait while we check your browser. " * 10)
+    sources.get_page = lambda url: (403, "")
+    browser.fetch_page = lambda url: calls.append(url) or (200, page)
+    assert sources.fetch_details("https://a.example/c") == ("", "blocked") and len(calls) == 1
+
+
+def test_never_fetch_and_unsafe_skip_browser():
+    fresh()
+    calls = []
+    browser.fetch_page = lambda url: calls.append(url) or (200, "")
+    sources.get_page = lambda url: (403, "")
+    job("https://www.linkedin.com/jobs/view/1", source="linkedin", description="seen in alert")
+    job("https://uk.indeed.com/viewjob?jk=1", source="indeed", description="seen in alert")
+    watcher._details_step()
+    watcher._details_step()
+    assert sources.fetch_details("file:///etc/passwd") == ("", "blocked")
+    assert calls == []
 
 
 if __name__ == "__main__":
