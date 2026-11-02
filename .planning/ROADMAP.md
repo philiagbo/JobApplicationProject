@@ -101,7 +101,7 @@ Plans:
   3. `fetch_details` returns the full description from the page's JSON-LD `JobPosting` block, or the largest text block when there is none
   4. When a page is blocked, it is retried once in Playwright and then marked "open listing to read", and no CAPTCHA is ever attempted
 
-**Plans:** 4/6 plans executed
+**Plans:** 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -115,8 +115,8 @@ Plans:
 - [x] 04-04-PLAN.md — Human exports one real alert per site, executor decodes and scrubs into api/samples/, human finishes the redaction (wave 3, checkpoints)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 04-05-PLAN.md — Tracer: LinkedIn sample through fake IMAP to GET /api/jobs; Indeed, CV-Library and Totaljobs parsers test-first against their samples; live Gmail human check (wave 4, human gate)
-- [ ] 04-06-PLAN.md — Tracer: single Playwright browser thread (queue.Queue) retries a page urllib cannot read, with real Chrome; browser rules locked with fakes (wave 4)
+- [x] 04-05-PLAN.md — Tracer: LinkedIn sample through fake IMAP to GET /api/jobs; Indeed, CV-Library and Totaljobs parsers test-first against their samples; live Gmail human check (wave 4, human gate)
+- [x] 04-06-PLAN.md — Tracer: single Playwright browser thread (queue.Queue) retries a page urllib cannot read, with real Chrome; browser rules locked with fakes (wave 4)
 
 ### Phase 5: Autofill Worker
 
@@ -156,6 +156,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Data, Scoring and First Source | 3/3 | Complete    | 2026-10-16 |
 | 2. Watcher and More Sources | 4/4 | Complete    | 2026-10-21 |
 | 3. Profile and Answers | 0/TBD | Not started | - |
-| 4. Gmail Alerts and Job Details | 4/6 | In Progress | - |
+| 4. Gmail Alerts and Job Details | 6/6 | In Progress | - |
 | 5. Autofill Worker | 0/TBD | Not started | - |
 | 6. Apply Queue API | 0/TBD | Not started | - |
