@@ -276,7 +276,8 @@ def parse_totaljobs(html: str) -> List[dict]:
     return _clean(jobs)
 
 
-_CHROME = re.compile(r"browser|unsubscribe|privacy|terms|contact", re.I)
+# whole labels only: "Contact Centre Advisor" or "Data Privacy Officer" is a job title, not page chrome
+_CHROME = re.compile(r"(show|view) in (the )?browser|unsubscribe|privacy policy|terms and conditions|contact us", re.I)
 
 
 def parse_totaljobs_invite(html: str) -> List[dict]:
@@ -285,7 +286,7 @@ def parse_totaljobs_invite(html: str) -> List[dict]:
     s = _strings(soup)
     for a in soup.find_all("a", href=True):
         title = _text(a)
-        if title and title in s and not _CHROME.search(title) and "totaljobs" in (urlsplit(a["href"]).hostname or ""):
+        if title and title in s and not _CHROME.fullmatch(title) and "totaljobs" in (urlsplit(a["href"]).hostname or ""):
             rest = s[s.index(title) + 1:]
             company, location = ((rest[:rest.index(title)] if title in rest else rest[:2]) + ["", ""])[:2]
             # ponytail: no job ID in these links (opaque tracker path); the same job in two emails is two rows

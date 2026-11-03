@@ -3,6 +3,7 @@ import difflib
 import html
 import ipaddress
 import re
+import socket
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -45,13 +46,18 @@ def plain_text(html_or_text: str) -> str:
 ALLOW_PRIVATE_HOSTS = False
 
 
+def _public_ip(ip) -> bool:
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
 def http_url(url) -> bool:
-    """True for an http(s) link to a public host; mail links must never point the app at local files or the LAN."""
+    """True for an http(s) link to a public host; mail links must never point the app at local files or the LAN.
+    No DNS here (alert parsing calls it); fetchable() adds the resolving check before any request."""
     if not isinstance(url, str):
         return False
     try:
         parts = urlsplit(url)
-        host = parts.hostname
+        host = (parts.hostname or "").rstrip(".")
     except ValueError:
         return False
     if parts.scheme.lower() not in ("http", "https") or not host:
@@ -61,11 +67,33 @@ def http_url(url) -> bool:
     if host == "localhost" or host.endswith(".localhost"):
         return False
     try:
-        ip = ipaddress.ip_address(host)
+        return _public_ip(ipaddress.ip_address(host))
     except ValueError:
-        # ponytail: no DNS resolution, so a public name pointing at a private address is not caught; local single-user app
+        # inet_aton shorthand (127.1, 2130706433, 0x7f000001, 017700000001) resolves to an IP; a real TLD is never a number
+        return not re.fullmatch(r"\d+|0x[0-9a-f]*", host.rsplit(".", 1)[-1])
+
+
+def never_fetch(url) -> bool:
+    """D-18: LinkedIn and Indeed are never fetched, on any hop."""
+    try:
+        host = (urlsplit(url or "").hostname or "").rstrip(".")
+    except ValueError:
+        return False
+    return any(host == d or host.endswith("." + d) for d in NEVER_FETCH_DOMAINS)
+
+
+def fetchable(url) -> bool:
+    """http_url, not LinkedIn/Indeed, and every address the host resolves to is public. Checked before every request."""
+    if not http_url(url) or never_fetch(url):
+        return False
+    if ALLOW_PRIVATE_HOSTS:
         return True
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    try:
+        infos = socket.getaddrinfo(urlsplit(url).hostname.rstrip("."), None)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    # ponytail: resolved here and again by the fetcher, so DNS rebinding between the two is not caught; a pinned-IP opener fixes it
+    return all(_public_ip(ipaddress.ip_address(i[4][0].split("%")[0])) for i in infos)
 
 
 # --- salary -----------------------------------------------------------------
@@ -125,11 +153,7 @@ SHORT_DESCRIPTION_CHARS = 500
 
 def details_plan(job: dict, settings: dict) -> str:
     """No-network decision for the details worker: "skipped", "ok" (already long enough) or "fetch"."""
-    try:
-        host = (urlsplit(job.get("url") or "").hostname or "").lower()
-    except ValueError:
-        host = ""
-    if job.get("source") in NEVER_FETCH_SOURCES or any(host == d or host.endswith("." + d) for d in NEVER_FETCH_DOMAINS):
+    if job.get("source") in NEVER_FETCH_SOURCES or never_fetch(job.get("url")):
         return "skipped"
     title = " %s " % normalise(job.get("title") or "")
     if any(normalise(w) and " %s " % normalise(w) in title for w in settings.get("excluded_words", [])):

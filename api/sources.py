@@ -1,6 +1,7 @@
 import base64
 import concurrent.futures
 import html
+import http.client
 import json
 import threading
 import time
@@ -118,16 +119,20 @@ def fetch_reed(fields: List[str], api_key: str, location: str = "", min_salary: 
 
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 BLOCKED_TEXT_CHARS = 200
-BLOCKED_STATUSES = (403, 429, 503)
+GONE_STATUSES = (404, 410)
 CHALLENGE_PHRASES = ("captcha", "verify you are human", "are you a robot", "just a moment",
                      "checking your browser", "unusual traffic", "access denied")
 
 
+class RedirectRefused(Exception):
+    """A hop pointed somewhere fetchable() refuses; the browser must never be handed this URL."""
+
+
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
-    # urllib would follow a redirect to ftp:// (or a LAN host) on its own; refuse anything http_url refuses
+    # urllib would follow a redirect to ftp://, a LAN host or LinkedIn/Indeed on its own; refuse every such hop
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not core.http_url(newurl):
-            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        if not core.fetchable(newurl):
+            raise RedirectRefused(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -135,14 +140,16 @@ def get_page(url: str) -> Tuple[int, str]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})  # no Accept-Encoding: urllib cannot gunzip
     try:
         with urllib.request.build_opener(_SafeRedirect).open(req, timeout=20) as resp:
-            if not core.http_url(resp.geturl()):
-                return 0, ""
+            if not core.fetchable(resp.geturl()):
+                raise RedirectRefused(resp.geturl())
             raw = resp.read(MAX_PAGE_BYTES)
             try:
                 return resp.status, raw.decode(resp.headers.get_content_charset() or "utf-8", errors="replace")
             except LookupError:  # unknown charset name
                 return resp.status, raw.decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
+        if 300 <= e.code < 400:  # urllib refused the hop itself (file:// target, redirect loop): the browser must not try
+            raise RedirectRefused(e.filename)
         return e.code, ""
 
 
@@ -183,7 +190,7 @@ def extract_description(doc: str) -> Tuple[str, bool, bool]:
     for tag in soup.find_all("script", type="application/ld+json"):
         try:
             _jobpostings(json.loads(tag.get_text(), strict=False), found)  # strict=False: raw newlines are common
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
     for raw in found:
         text = core.plain_text(html.unescape(raw))  # unescape first to expose the tags, then strip them
@@ -199,7 +206,7 @@ def extract_description(doc: str) -> Tuple[str, bool, bool]:
 
 def judge_page(code: int, doc: str) -> Optional[str]:
     """The readable description, or None when the page is blocked (D-16)."""
-    if code in BLOCKED_STATUSES:
+    if not 200 <= code < 300:  # 404 / 410 / 5xx pages are never a job description
         return None
     text, _, has_jobposting = extract_description(doc)
     if not has_jobposting:  # a real posting page often mentions reCAPTCHA in a footer: only judge pages with no JobPosting
@@ -214,13 +221,17 @@ def judge_page(code: int, doc: str) -> Optional[str]:
 
 def fetch_details(url: str) -> Tuple[str, str]:
     """("text", "ok") or ("", "blocked"); never raises on network trouble."""
-    if not core.http_url(url):
+    if not core.fetchable(url):
         return "", "blocked"
     try:
         code, doc = get_page(url)
-    except (OSError, ValueError):
+    except RedirectRefused:
+        return "", "blocked"  # never hand a refused target to the browser
+    except (OSError, ValueError, http.client.HTTPException):
         # ponytail: a fetch that fails while offline is final (blocked); set details_status back to 'pending' to retry
         code, doc = 0, ""
+    if code in GONE_STATUSES:
+        return "", "blocked"  # a browser will not bring an expired listing back
     text = judge_page(code, doc)
     if text is None:  # DETAIL-02: one retry in the real browser, then blocked
         try:

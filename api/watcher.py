@@ -54,35 +54,40 @@ def _gmail_since(conn, today: date) -> date:
         return today - timedelta(days=FIRST_POLL_DAYS)
 
 
-def _fetch_gmail(conn, address, warn):
-    today = date.today()
-    jobs = alerts.fetch_gmail_alerts(address, _gmail_since(conn, today), warn)
-    # SINCE is date-granular and the server's timezone may differ: step back a day, URL dedupe absorbs the overlap
-    db.set_raw(conn, "gmail_last_poll", (today - timedelta(days=1)).isoformat())  # only after a good poll
-    return jobs
+def _gmail_polled(conn, address, today):
+    """Called only once the polled jobs are stored. Skipped if the account was changed or disconnected meanwhile,
+    so that account keeps its 7-day lookback (D-03)."""
+    # ponytail: check-then-write, not one transaction; a reconnect in the microseconds between is not caught
+    if db.get_raw(conn, "gmail_address") == address:
+        # SINCE is date-granular and the server's timezone may differ: step back a day, URL dedupe absorbs the overlap
+        db.set_raw(conn, "gmail_last_poll", (today - timedelta(days=1)).isoformat())
 
 
 def _sources(conn, settings, names):
     fields = settings["career_fields"]
     if "reed" in names and fields and settings["reed_api_key"]:
-        yield "reed", lambda warn: sources.fetch_reed(fields, settings["reed_api_key"], settings["location"], settings["min_salary"])
+        yield "reed", lambda warn: sources.fetch_reed(fields, settings["reed_api_key"], settings["location"], settings["min_salary"]), None
     if "remotive" in names and fields:
-        yield "remotive", lambda warn: sources.fetch_remotive(fields)
+        yield "remotive", lambda warn: sources.fetch_remotive(fields), None
     if "gmail" in names:  # only then: the API tick never touches keyring
         address = gmail_account(conn)
         if address:
-            yield "gmail", lambda warn: _fetch_gmail(conn, address, warn)
+            today = date.today()
+            yield ("gmail", lambda warn: alerts.fetch_gmail_alerts(address, _gmail_since(conn, today), warn),
+                   lambda: _gmail_polled(conn, address, today))
 
 
 def run_fetch(conn, settings, names=ALL_SOURCES):
     counts, errors = {}, {}
-    for name, call in _sources(conn, settings, names):
+    for name, call, stored in _sources(conn, settings, names):
         started = _now()
         prev = STATUS.get(name, {})
         warnings = []
         try:
             jobs = call(warnings.append)  # can take minutes; settings may be saved meanwhile
             counts[name] = db.insert_jobs(conn, jobs, db.get_settings(conn))  # so score with the latest
+            if stored:
+                stored()  # after the insert: a failed insert must not move the Gmail poll window
             if counts[name]:
                 DETAILS_WAKE.set()
             error = None

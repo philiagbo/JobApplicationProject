@@ -530,6 +530,34 @@ def test_cover_letter_pure():
     assert (profile, j) == before
 
 
+def test_private_host_shorthands_refused():
+    assert not core.ALLOW_PRIVATE_HOSTS
+    for host in ("127.1", "2130706433", "0x7f000001", "017700000001", "localhost.", "0", "10.1", "[::1]",
+                 "[::ffff:127.0.0.1]", "127.0.0.1.", "."):
+        url = "http://%s/x" % host
+        assert not core.http_url(url) and not core.fetchable(url), url
+    assert core.http_url("https://www.reed.co.uk./jobs/1") and core.http_url("https://8.8.8.8/")
+
+
+def test_fetchable_resolves_every_address():
+    real = core.socket.getaddrinfo
+    answers = {"lan.example": ["93.184.216.34", "192.168.1.1"], "pub.example": ["93.184.216.34", "2606:2800:220:1::"]}
+
+    def fake(host, port):
+        if host not in answers:
+            raise core.socket.gaierror("no such host")
+        return [(0, 0, 0, "", (ip, 0)) for ip in answers[host]]
+
+    core.socket.getaddrinfo = fake
+    try:
+        assert core.http_url("http://lan.example/") and not core.fetchable("http://lan.example/")
+        assert core.fetchable("https://pub.example/a") and core.fetchable("https://pub.example./a")
+        assert not core.fetchable("https://missing.example/")
+        assert not core.fetchable("https://uk.indeed.com/viewjob") and not core.fetchable("https://www.linkedin.com./jobs")
+    finally:
+        core.socket.getaddrinfo = real
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

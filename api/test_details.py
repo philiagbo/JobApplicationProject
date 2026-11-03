@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import html
+import http.client
 import http.server
 import json
 import logging
@@ -307,10 +308,13 @@ def test_fetch_details_rejects_unsafe_urls():
 
 def test_redirect_to_file_blocked():
     fresh()
-    for target in ("file:///etc/passwd", "ftp://127.0.0.1/secret"):
+    calls = []
+    browser.fetch_page = lambda url: calls.append(url) or (200, POSTING_PAGE)
+    for target in ("file:///etc/passwd", "ftp://127.0.0.1/secret", "https://uk.indeed.com/viewjob?jk=1"):
         url = serve("/redir", "", status=302, headers={"Location": target})
-        assert sources.get_page(url) == (302, "")
+        raises(sources.RedirectRefused, sources.get_page, url)
         assert sources.fetch_details(url) == ("", "blocked")
+    assert calls == []  # a refused redirect is never handed to the browser, which would follow it (CR-01, D-18)
     core.ALLOW_PRIVATE_HOSTS = True
     serve("/hop", "", status=302, headers={"Location": BASE + "/posting"})
     assert sources.fetch_details(BASE + "/hop")[1] == "ok"  # a redirect to a safe page still works
@@ -511,15 +515,55 @@ class FakeResponse:
         self.status = status
 
 
+class FakeRequest:
+    def __init__(self, url, navigation):
+        self.url, self.navigation = url, navigation
+
+    def is_navigation_request(self):
+        return self.navigation
+
+
+class FakeRoute:
+    def __init__(self, page, request):
+        self.page, self.request = page, request
+
+    def continue_(self):
+        self.page.routed.append(("continue", self.request.url))
+
+    def abort(self):
+        self.page.routed.append(("abort", self.request.url))
+
+
 class FakePage:
-    def __init__(self, status=200, content="<html>page</html>", url=None, goto_error=None):
+    def __init__(self, status=200, content="<html>page</html>", url=None, goto_error=None, hops=(), subresources=()):
         self.calls, self.status, self.html, self.after, self.goto_error, self.url = [], status, content, url, goto_error, ""
+        self.handlers, self.routed, self.hops, self.subresources = {}, [], hops, subresources
+
+    def route(self, pattern, handler):
+        self.handlers["route"] = handler
+
+    def on(self, event, handler):
+        self.handlers[event] = handler
+
+    def _request(self, url, navigation, routed=True):
+        request = FakeRequest(url, navigation)
+        if "request" in self.handlers:
+            self.handlers["request"](request)
+        if routed and "route" in self.handlers:
+            self.handlers["route"](FakeRoute(self, request))
 
     def goto(self, url, **kw):
         self.calls.append(("goto", (url,), kw))
         if self.goto_error:
             raise self.goto_error
-        self.url = self.after or url
+        self._request(url, True)
+        if ("abort", url) in self.routed:
+            raise browser.Error("net::ERR_FAILED")
+        for hop in self.hops:
+            self._request(hop, True, routed=False)  # like Playwright: a server redirect hop is never routed
+        for sub in self.subresources:
+            self._request(sub, False)
+        self.url = self.after or (self.hops[-1] if self.hops else url)
         return FakeResponse(self.status)
 
     def wait_for_load_state(self, *a, **kw):
@@ -546,20 +590,22 @@ class FakeBrowser:
 
 
 class FakeChromium:
-    def __init__(self, page=None, missing=()):
-        self.page, self.missing, self.launches, self.browsers = page or FakePage(), missing, [], []
+    def __init__(self, page=None, missing=(), broken=()):
+        self.page, self.missing, self.broken, self.launches, self.browsers = page or FakePage(), missing, broken, [], []
 
     def launch(self, **kw):
         self.launches.append(kw)
         if kw.get("channel") in self.missing:
             raise browser.Error("Chromium distribution '%s' is not found" % kw.get("channel"))
+        if kw.get("channel") in self.broken:
+            raise browser.Error("Timeout 20000ms exceeded")
         self.browsers.append(FakeBrowser(self.page))
         return self.browsers[-1]
 
 
 class FakePW:
-    def __init__(self, page=None, missing=()):
-        self.chromium = FakeChromium(page, missing)
+    def __init__(self, page=None, missing=(), broken=()):
+        self.chromium = FakeChromium(page, missing, broken)
 
 
 def test_browser_single_thread():
@@ -624,7 +670,8 @@ def test_channel_order_and_memo():
     reset_browser(REAL_START)
     pw = FakePW(missing=("msedge",))
     assert isinstance(browser.launch_headless(pw), FakeBrowser)
-    assert pw.chromium.launches == [{"channel": "msedge", "headless": True}, {"channel": "chrome", "headless": True}]
+    assert pw.chromium.launches == [{"channel": "msedge", "headless": True, "timeout": 20000},
+                                    {"channel": "chrome", "headless": True, "timeout": 20000}]
     both = FakePW(missing=("msedge", "chrome"))
     try:
         browser.launch_headless(both)
@@ -715,6 +762,96 @@ def test_never_fetch_and_unsafe_skip_browser():
     watcher._details_step()
     assert sources.fetch_details("file:///etc/passwd") == ("", "blocked")
     assert calls == []
+
+
+def test_browser_guard_aborts_refused_requests():
+    fresh()
+    reset_browser(REAL_START)
+    core.ALLOW_PRIVATE_HOSTS = False
+    try:
+        page = FakePage(subresources=("https://www.linkedin.com/li.js", "http://192.168.1.1/admin", "http://127.1/",
+                                      "https://93.184.216.34/ok.js"))
+        assert browser._load_page(FakePW(page), "https://93.184.216.34/job") == (200, "<html>page</html>")
+        assert page.routed == [("continue", "https://93.184.216.34/job"), ("abort", "https://www.linkedin.com/li.js"),
+                               ("abort", "http://192.168.1.1/admin"), ("abort", "http://127.1/"),
+                               ("continue", "https://93.184.216.34/ok.js")]
+        for hop in ("http://10.0.0.1/", "https://uk.indeed.com/viewjob?jk=1"):  # a hop through a refused host, back out
+            page = FakePage(hops=(hop, "https://93.184.216.34/back"))
+            assert browser._load_page(FakePW(page), "https://93.184.216.34/job") == (0, ""), hop
+            assert "content" not in [c[0] for c in page.calls]
+        page = FakePage()
+        raises(browser.Error, browser._load_page, FakePW(page), "https://www.linkedin.com/jobs/view/1")
+        assert page.routed == [("abort", "https://www.linkedin.com/jobs/view/1")]
+    finally:
+        core.ALLOW_PRIVATE_HOSTS = True
+
+
+def test_gone_page_never_stored():
+    fresh()
+    calls = []
+    browser.fetch_page = lambda url: calls.append(url) or (404, POSTING_PAGE)
+    for code in (404, 410):
+        assert sources.fetch_details(serve("/gone%d" % code, POSTING_PAGE, status=code)) == ("", "blocked")
+    assert calls == []  # the browser cannot bring an expired listing back
+    sources.get_page = lambda url: (0, "")
+    assert sources.fetch_details("https://a.example/g") == ("", "blocked") and len(calls) == 1
+    assert sources.judge_page(500, POSTING_PAGE) is None and sources.judge_page(200, POSTING_PAGE) is not None
+
+
+def test_http_client_errors_retry_in_browser():
+    fresh()
+
+    def truncated(url):
+        raise http.client.IncompleteRead(b"partial")
+
+    sources.get_page = truncated
+    browser.fetch_page = lambda url: (200, POSTING_PAGE)
+    assert sources.fetch_details("https://a.example/t")[1] == "ok"
+    deep = '<script type="application/ld+json">%s</script>' % ("[" * 100000)
+    assert sources.extract_description(deep) == ("", False, False)
+
+
+def test_timed_out_task_cancelled():
+    fresh()
+    page = FakePage()
+    reset_browser(lambda: FakePW(page))
+    hold = threading.Event()
+    try:
+        browser.submit(lambda pw: hold.wait(5))  # keeps the browser thread busy
+        with patched(browser, "RESULT_TIMEOUT_SECONDS", 0.1):
+            raises(concurrent.futures.TimeoutError, REAL_FETCH_PAGE, BASE + "/x")
+        hold.set()
+        assert browser.submit(lambda pw: "after").result(5) == "after"
+        assert page.calls == []  # dropped while queued, not run late
+    finally:
+        hold.set()
+        reset_browser(REAL_START)
+
+
+def test_transient_browser_failure_not_remembered():
+    fresh()
+    reset_browser(REAL_START)
+    flaky = FakePW(missing=("msedge",), broken=("chrome",))
+    raises(browser.BrowserUnavailable, browser.launch_headless, flaky)
+    raises(browser.BrowserUnavailable, browser.launch_headless, flaky)
+    assert len(flaky.chromium.launches) == 4 and browser._unavailable is None  # probed again next time
+    starts = []
+
+    def start_once_busy():
+        starts.append(1)
+        if len(starts) == 1:
+            raise RuntimeError("busy")
+        return FakePW()
+
+    reset_browser(start_once_busy)
+    browser.log.disabled = True
+    try:
+        with patched(browser, "START_RETRY_SECONDS", 0):
+            raises(browser.BrowserUnavailable, browser.submit(lambda pw: 1).result, 5)
+            assert browser.submit(lambda pw: "up").result(5) == "up" and len(starts) == 2
+    finally:
+        browser.log.disabled = False
+        reset_browser(REAL_START)
 
 
 if __name__ == "__main__":

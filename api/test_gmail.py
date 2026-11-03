@@ -454,6 +454,45 @@ def test_first_poll_7_days_then_last_poll():
     assert [a[5] for a in searches(FakeIMAP.instances[-1])] == [alerts.imap_date(today - timedelta(days=1))]
 
 
+def test_failed_insert_keeps_poll_window():
+    fresh()
+    FakeIMAP.MAILBOX.append(one_job())
+    connect_gmail(app.app.test_client())
+    real = db.insert_jobs
+
+    def locked(*a):
+        raise db.sqlite3.OperationalError("database is locked")
+
+    db.insert_jobs = locked
+    try:
+        with captured():
+            watcher._tick_gmail(None)
+    finally:
+        db.insert_jobs = real
+    assert watcher.STATUS["gmail"]["ok"] is False and stored("gmail_last_poll") is None
+    watcher._tick_gmail(None)  # the next poll still looks back the full 7 days
+    assert [a[5] for a in searches(FakeIMAP.instances[-1])] == [alerts.imap_date(date.today() - timedelta(days=7))]
+
+
+def test_account_change_during_poll_keeps_lookback():
+    fresh()
+    c = app.app.test_client()
+    connect_gmail(c, "a@gmail.com")
+    real = alerts.fetch_gmail_alerts
+
+    def reconnect_meanwhile(*a):
+        found = real(*a)
+        connect_gmail(c, "b@gmail.com")
+        return found
+
+    alerts.fetch_gmail_alerts = reconnect_meanwhile
+    try:
+        watcher._tick_gmail(None)
+    finally:
+        alerts.fetch_gmail_alerts = real
+    assert stored("gmail_address") == "b@gmail.com" and stored("gmail_last_poll") is None
+
+
 def test_zero_job_alert_warns_once():
     fresh()
     c = app.app.test_client()
@@ -744,6 +783,9 @@ def test_parse_totaljobs_invite_sample():
     check_sample("totaljobs-invite", "totaljobs-invite", "totaljobs", 1, dict(
         url_prefix="https://web.totaljobsmail.co.uk/", title="Support Coordinator", company="NFP People"))
     assert alerts.parse_totaljobs_invite(sample_body("totaljobs-invite"))[0]["location"]
+    for title in ("Contact Centre Advisor", "Data Privacy Officer", "Terms Manager", "Browser Engineer"):
+        jobs = alerts.parse_totaljobs_invite(sample_body("totaljobs-invite").replace("Support Coordinator", title))
+        assert [j["title"] for j in jobs] == [title], title
 
 
 # key -> (sample, URL rule): the four sites whose links carry a job ID
