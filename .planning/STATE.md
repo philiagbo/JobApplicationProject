@@ -4,16 +4,16 @@ current_phase: 04
 current_phase_name: Gmail Alerts and Job Details
 status: executing
 stopped_at: Phase 4 context gathered
-last_updated: "2026-10-25T23:42:14.137Z"
+last_updated: "2026-11-12T21:27:26.516Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 04 execution started
-state_head: 1175ad660cc9d01c4e831ebda44673cec2c6ccc2
+state_head: 1686d8551f8f88168a25bc6d8f059769060a97a1
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 3
   total_plans: 17
-  completed_plans: 11
-  percent: 50
+  completed_plans: 17
+  percent: 43
 ---
 
 # Project State
@@ -32,7 +32,7 @@ Plan: 1 of 6
 Status: Executing Phase 04
 Last activity: 2026-10-25 — Phase 04 execution started
 
-Progress: [█████░░░░░] 50%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -91,6 +91,10 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261021-wez | Remove Adzuna job source | 2026-10-21 | 4271a28 | [261021-wez-remove-adzuna-job-source](./quick/261021-wez-remove-adzuna-job-source/) |
+
+### Roadmap Evolution
+
+- Phase 4.1 inserted after Phase 4: Better ranking for LinkedIn/Indeed alert jobs: cross-source description lookup (Reed/employer ATS, strict title+company+location match), paste-a-description box, partial-info fair scoring, title+company dedupe for ID-less alert links
 
 ## Deferred Items
 

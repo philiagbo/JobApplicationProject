@@ -16,6 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Watcher and More Sources** - Background watcher thread polling Remotive and Reed on configurable intervals (completed 2026-10-21)
 - [x] **Phase 3: Profile and Answers** - CV upload extraction, saved answers with matching, and cover letter template (completed 2026-10-23)
 - [ ] **Phase 4: Gmail Alerts and Job Details** - LinkedIn, Indeed, CV-Library and Totaljobs alerts via Gmail, plus full job descriptions
+- [ ] **Phase 4.1: Better LinkedIn and Indeed Ranking** (INSERTED) - Cross-source descriptions, paste box, partial-info scoring and title+company dedupe for alert jobs
 - [ ] **Phase 5: Autofill Worker** - Single Playwright thread that fills application forms and detects (never performs) Submit
 - [ ] **Phase 6: Apply Queue API** - Queue listing, unanswered-questions flow and skip
 
@@ -117,6 +118,18 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 04-05-PLAN.md — Tracer: LinkedIn sample through fake IMAP to GET /api/jobs; Indeed, CV-Library and Totaljobs parsers test-first against their samples; live Gmail human check (wave 4, human gate)
 - [x] 04-06-PLAN.md — Tracer: single Playwright browser thread (queue.Queue) retries a page urllib cannot read, with real Chrome; browser rules locked with fakes (wave 4)
+
+### Phase 04.1: Better LinkedIn and Indeed Ranking (INSERTED)
+
+**Goal:** LinkedIn and Indeed alert jobs are ranked on more than a title: their full description is found on a source the app may read, or pasted by the person, and jobs with partial information are scored fairly and deduplicated
+
+Scope (agreed during Phase 4): cross-source description lookup (Reed API or the employer's careers/ATS page, strict title+company+location match, LinkedIn/Indeed never contacted, D-18); a paste-a-description box that re-scores the job; partial-info scoring with a visible label; title+company dedupe for alert links with no job ID
+**Requirements**: TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 04.1 to break down)
 
 ### Phase 5: Autofill Worker
 
