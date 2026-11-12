@@ -533,7 +533,7 @@ def test_cover_letter_pure():
 def test_private_host_shorthands_refused():
     assert not core.ALLOW_PRIVATE_HOSTS
     for host in ("127.1", "2130706433", "0x7f000001", "017700000001", "localhost.", "0", "10.1", "[::1]",
-                 "[::ffff:127.0.0.1]", "127.0.0.1.", "."):
+                 "[::ffff:127.0.0.1]", "127.0.0.1.", ".", "100.64.0.1", "100.127.255.254", "224.0.1.1"):
         url = "http://%s/x" % host
         assert not core.http_url(url) and not core.fetchable(url), url
     assert core.http_url("https://www.reed.co.uk./jobs/1") and core.http_url("https://8.8.8.8/")

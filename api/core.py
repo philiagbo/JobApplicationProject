@@ -47,7 +47,8 @@ ALLOW_PRIVATE_HOSTS = False
 
 
 def _public_ip(ip) -> bool:
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    # is_global also excludes shared space 100.64.0.0/10 (Tailscale, carrier NAT), which is_private misses
+    return ip.is_global and not ip.is_multicast
 
 
 def http_url(url) -> bool:

@@ -76,7 +76,7 @@ created: "2026-11-12"
 
 ### Residual notes (non-blocking at ASVS L1)
 
-1. `core._public_ip` does not use `ip.is_global`, so the shared-address range 100.64.0.0/10 (used by Tailscale and carrier-grade NAT) passes the SSRF guard. Fix: return `ip.is_global`.
+1. ~~`core._public_ip` does not use `ip.is_global`, so 100.64.0.0/10 (Tailscale, carrier-grade NAT) passes the SSRF guard.~~ Fixed 2026-11-12: `_public_ip` returns `ip.is_global and not ip.is_multicast`; covered in test_private_host_shorthands_refused.
 2. DNS rebinding window between `fetchable` and the request (ponytail comment, core.py:95).
 3. Browser: a refused server-redirect hop is sent before the page is discarded (ponytail comment, browser.py:105-107); `page.route` likely misses service-worker and WebSocket traffic. No content is stored in any of these cases.
 4. The 60 s browser wait bounds the caller, not the browser thread: the route guard's `getaddrinfo` has no timeout.
