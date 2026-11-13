@@ -9,7 +9,7 @@ last_activity: 2026-11-12
 last_activity_desc: Phase 04.1 execution started
 state_head: b42c41a9063daa04bdda921741ccb66a45e6c128
 progress:
-  total_phases: 7
+  total_phases: 9
   completed_phases: 3
   total_plans: 21
   completed_plans: 18
@@ -95,6 +95,8 @@ None yet.
 ### Roadmap Evolution
 
 - Phase 4.1 inserted after Phase 4: Better ranking for LinkedIn/Indeed alert jobs: cross-source description lookup (Reed/employer ATS, strict title+company+location match), paste-a-description box, partial-info fair scoring, title+company dedupe for ID-less alert links
+- Phase 4.2 inserted after Phase 4.1: UI slices 1-2 pulled forward (see .planning/UI-MAP.md): shell, Settings, Jobs list view on existing APIs
+- Phase 4.3 inserted after Phase 4.2: UI slice 3 pulled forward (see .planning/UI-MAP.md): motion swipe deck
 
 ## Deferred Items
 

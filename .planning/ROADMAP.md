@@ -17,6 +17,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Profile and Answers** - CV upload extraction, saved answers with matching, and cover letter template (completed 2026-10-23)
 - [ ] **Phase 4: Gmail Alerts and Job Details** - LinkedIn, Indeed, CV-Library and Totaljobs alerts via Gmail, plus full job descriptions
 - [ ] **Phase 4.1: Better LinkedIn and Indeed Ranking** (INSERTED) - Cross-source descriptions, paste box, partial-info scoring and title+company dedupe for alert jobs
+- [ ] **Phase 4.2: UI Shell, Settings and Jobs List** (INSERTED) - App shell, Settings page and Jobs list view on the existing API
+- [ ] **Phase 4.3: Swipe View** (INSERTED) - Motion drag-to-swipe deck with keyboard support and view toggle
 - [ ] **Phase 5: Autofill Worker** - Single Playwright thread that fills application forms and detects (never performs) Submit
 - [ ] **Phase 6: Apply Queue API** - Queue listing, unanswered-questions flow and skip
 
@@ -140,6 +142,28 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 04.1-04-PLAN.md — Tracer: the same ID-less Indeed job-match email twice is one row; title+company dedupe for Indeed match, Totaljobs invite and sponsored Indeed links, plus a start-up backfill that keys the oldest stored copy (Claude's Discretion; backfill user-decided)
+
+### Phase 04.2: UI Shell, Settings and Jobs List (INSERTED)
+
+**Goal**: The person can set up the app and work through ranked jobs in the browser: app shell and design tokens, Settings (career fields, filters, keys, Gmail connect, watcher status, Check now) and the Jobs list view
+**Requirements**: UI-01 (list view, filter chips, Undo toast), UI-04 (Settings page)
+**Depends on:** Phase 4.1 (partial-info flag and paste endpoint)
+**Canonical refs:** `.planning/UI-MAP.md` (slices 1-2), `.planning/phases/04.1-better-linkedin-and-indeed-ranking/04.1-UI-SPEC.md` (PartialInfoBadge, PasteDescription), `PLAN.md` (Jobs page)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 04.2 to break down)
+
+### Phase 04.3: Swipe View (INSERTED)
+
+**Goal**: Jobs can be triaged one card at a time by dragging, buttons or arrow keys, with a remembered swipe/list toggle
+**Requirements**: UI-01 (swipe view)
+**Depends on:** Phase 4.2
+**Canonical refs:** `.planning/UI-MAP.md` (slice 3), `PLAN.md` (Jobs page, swipe actions)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 04.3 to break down)
 
 ### Phase 5: Autofill Worker
 
