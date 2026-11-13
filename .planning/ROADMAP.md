@@ -126,11 +126,11 @@ Plans:
 Scope (agreed during Phase 4): cross-source description lookup (Reed API or the employer's careers/ATS page, strict title+company+location match, LinkedIn/Indeed never contacted, D-18); a paste-a-description box that re-scores the job; partial-info scoring with a visible label; title+company dedupe for alert links with no job ID
 **Requirements**: TBD
 **Depends on:** Phase 4
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 04.1-01-PLAN.md — Tracer: LinkedIn alert job through the details worker to a Reed search and job-details lookup to a Reed-filled job in GET /api/jobs; strict company+title match, D-05 copy rules, no-key/no-match/failure paths, start-up re-pend of old skipped rows; live Reed human check (D-01..D-05)
+- [x] 04.1-01-PLAN.md — Tracer: LinkedIn alert job through the details worker to a Reed search and job-details lookup to a Reed-filled job in GET /api/jobs; strict company+title match, D-05 copy rules, no-key/no-match/failure paths, start-up re-pend of old skipped rows; live Reed human check (D-01..D-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 04.1-02-PLAN.md — Tracer: snippet-only job shows summary.partial_info and the partial con in GET /api/jobs, cleared by a Reed fill; neutral skills credit for partial jobs (D-09..D-12)
