@@ -23,7 +23,7 @@ Mapped 2026-11-13 against the backend as of Phase 4.1 (plans 01-02 committed, 03
 
 - `GET /api/jobs?status=new` → `Job[]` sorted score desc. Job: `id, url, source, title, company, location, salary, description, summary, score, pros[], cons[], status, created_at, status_changed_at`. `summary`: `salary_text, salary_annual, currency, job_type, remote, years_experience, what_youd_do[], what_they_want[]`.
 - Status actions return the updated job; 404 unknown id; 409 invalid transition (`undo` only from `dismissed`/`queued`).
-- `GET /api/settings` → `career_fields[], excluded_words[], min_salary, location, reed_api_key, adzuna_app_id, adzuna_app_key, gmail_poll_minutes, api_poll_minutes`. `PUT` merges; 400 `{"error"}` on bad type/unknown key.
+- `GET /api/settings` → `career_fields[], known_skills[], excluded_words[], min_salary, location, reed_api_key, gmail_poll_minutes, api_poll_minutes, cover_letter_template`. (No Adzuna settings: the backend dropped Adzuna; sources are reed, remotive, gmail.) `PUT` merges; 400 `{"error"}` on bad type/unknown key.
 - `POST /api/fetch` → 400 when no career fields, 409 if already fetching, 502 if every source failed, else 200 `{by_source, errors}`.
 - `GET /api/watcher` → `{running, fetching, sources: {name: {last_poll, ok, last_ok_at, error}}}`.
 - `GET /api/stats` → `{days: 7, found|queued|dismissed|applied: {total, by_source}}`.
