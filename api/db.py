@@ -77,6 +77,10 @@ def init_db() -> None:
         if "details_status" not in [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]:
             with conn:  # D-17: the one definition of the column; legacy rows start 'pending' too
                 conn.execute("ALTER TABLE jobs ADD COLUMN details_status TEXT NOT NULL DEFAULT 'pending'")
+        with conn:  # D-02: rows Phase 4 skipped under D-18 get their one Reed lookup; a row skipped for an excluded
+            # word is re-skipped by details_plan with no network
+            conn.execute("UPDATE jobs SET details_status = 'pending'"
+                         " WHERE details_status = 'skipped' AND source IN ('linkedin', 'indeed')")
         seed_answers(conn)
 
 
@@ -198,7 +202,10 @@ def rescore_new(conn, settings: dict, profile: Optional[dict] = None) -> None:
                          (total, json.dumps(pros), json.dumps(cons), row["id"]))
 
 
-DETAILS_STATUSES = ("pending", "ok", "blocked", "skipped")
+# "reed": description copied from a matched Reed ad (D-05); "pasted": the person pasted it and nothing automatic
+# may overwrite it (D-06, written by 04.1-03). The one representation of where a description came from.
+DETAILS_STATUSES = ("pending", "ok", "blocked", "skipped", "reed", "pasted")
+WORKER_STATUSES = ("ok", "blocked", "skipped")  # what save_details accepts; the others have their own writers
 
 
 def next_pending(conn) -> Optional[dict]:
@@ -208,7 +215,7 @@ def next_pending(conn) -> Optional[dict]:
 
 
 def save_details(conn, job_id: int, text: str, status: str) -> None:
-    if status not in DETAILS_STATUSES[1:]:
+    if status not in WORKER_STATUSES:
         raise ValueError("Unknown details status: %s" % status)
     with conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -217,14 +224,32 @@ def save_details(conn, job_id: int, text: str, status: str) -> None:
         if not (status == "ok" and len(text) > len(core.plain_text(row["description"]))):
             conn.execute("UPDATE jobs SET details_status = ? WHERE id = ?", (status, job_id))
             return
-        old = json.loads(row["summary"])  # source hints (Remotive "Remote") are not columns; keep them (Pitfall 3)
-        job = dict(job_dict(row), description=text, job_type=old.get("job_type"), remote=old.get("remote"))
-        summary = core.summarize(job)
-        total, pros, cons = core.score(dict(job, summary=summary), get_settings(conn), get_profile(conn))
-        conn.execute("UPDATE jobs SET description = ?, details_status = ? WHERE id = ?", (text, status, job_id))
+        _rewrite(conn, row, "description = ?, details_status = ?", (text, status), description=text)
+
+
+def save_reed_match(conn, job_id: int, text: str, salary: str = "", job_type: Optional[str] = None) -> None:
+    with conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return
+        new_salary = row["salary"] or salary  # D-05: Reed fills only what the alert left empty
+        # a paste always wins; the url and Reed's link are never written
+        _rewrite(conn, row, "description = ?, salary = ?, details_status = 'reed'", (text, new_salary),
+                 " AND details_status != 'pasted'", description=text, details_status="reed", salary=new_salary,
+                 job_type=job_type)
+
+
+def _rewrite(conn, row, set_sql: str, args: tuple, guard: str = "", job_type: Optional[str] = None, **changes) -> None:
+    """Write new job columns, then re-summarise and re-score if that update hit the row (and the job is still new)."""
+    old = json.loads(row["summary"])  # source hints (Remotive "Remote") are not columns; keep them (Pitfall 3)
+    job = dict(job_dict(row), job_type=old.get("job_type") or job_type, remote=old.get("remote"), **changes)
+    summary = core.summarize(job)
+    total, pros, cons = core.score(dict(job, summary=summary), get_settings(conn), get_profile(conn))
+    cur = conn.execute("UPDATE jobs SET %s WHERE id = ?%s" % (set_sql, guard), args + (row["id"],))
+    if cur.rowcount == 1:
         # same statement checks status, so a dismiss/queue racing this save never gets re-scored (D-13)
         conn.execute("UPDATE jobs SET summary = ?, score = ?, pros = ?, cons = ? WHERE id = ? AND status = 'new'",
-                     (json.dumps(summary), total, json.dumps(pros), json.dumps(cons), job_id))
+                     (json.dumps(summary), total, json.dumps(pros), json.dumps(cons), row["id"]))
 
 
 STATUSES = ("new", "dismissed", "queued", "filling", "ready", "needs_input", "applied", "skipped")

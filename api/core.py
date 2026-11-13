@@ -153,14 +153,15 @@ SHORT_DESCRIPTION_CHARS = 500
 
 
 def details_plan(job: dict, settings: dict) -> str:
-    """No-network decision for the details worker: "skipped", "ok" (already long enough) or "fetch"."""
-    if job.get("source") in NEVER_FETCH_SOURCES or never_fetch(job.get("url")):
-        return "skipped"
+    """No-network decision for the details worker: "skipped" (excluded word), "ok" (already long enough),
+    "lookup" (LinkedIn/Indeed: ask only the Reed API, never the site, D-18) or "fetch"."""
     title = " %s " % normalise(job.get("title") or "")
     if any(normalise(w) and " %s " % normalise(w) in title for w in settings.get("excluded_words", [])):
         return "skipped"
     if len(plain_text(job.get("description") or "")) >= SHORT_DESCRIPTION_CHARS:
         return "ok"
+    if job.get("source") in NEVER_FETCH_SOURCES or never_fetch(job.get("url")):
+        return "lookup"
     return "fetch"
 
 
@@ -311,6 +312,9 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
     if hits:
         total -= EXCLUDED_POINTS
 
+    if job.get("details_status") == "reed":  # derived from the stored status: rescore_new rebuilds pros from scratch
+        pros.append("Description from Reed")
+
     return max(0, min(100, int(total))), pros, cons
 
 
@@ -338,6 +342,40 @@ def answer_block_reason(question: str, answer: str, company: Optional[str] = "")
 def _ratio(a: str, b: str) -> float:
     # autojunk=False: the default junk heuristic distorts ratios on strings of 200+ characters
     return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+REED_TITLE_MIN = 0.9
+_COMPANY_NOISE = _LEGAL | {"group", "the", "and"}  # "and": normalise turns "&" into a space
+
+
+def company_key(name: Optional[str]) -> str:
+    words = normalise(name or "").split()
+    return " ".join([w for w in words if w not in _COMPANY_NOISE] or words)
+
+
+# ponytail: fixed level-word list; a level word on one side only means a different job (Software Engineer vs
+# Software Engineer II scores 0.919); extend the set if a wrong match shows up
+_LEVEL = {"junior", "senior", "lead", "principal", "head", "graduate", "trainee", "intern", "assistant", "associate",
+          "i", "ii", "iii", "iv", "1", "2", "3", "4"}
+
+
+def reed_match(job: dict, results: List[dict]) -> Optional[dict]:
+    """The Reed search result that is this alert job (D-04): same company, near-identical title, same level.
+    Location only breaks ties between several matches; it is never required."""
+    ck, nt = company_key(job.get("company")), normalise(job.get("title") or "")
+    if not ck or not nt:
+        return None
+    where = set(normalise(job.get("location") or "").split())
+    hits = []
+    for r in results:
+        if company_key(r.get("employerName")) != ck:
+            continue
+        title = normalise(r.get("jobTitle") or "")
+        ratio = _ratio(nt, title)
+        if ratio < REED_TITLE_MIN or (set(nt.split()) ^ set(title.split())) & _LEVEL:
+            continue
+        hits.append(((len(where & set(normalise(r.get("locationName") or "").split())), ratio), r))
+    return max(hits, key=lambda h: h[0])[1] if hits else None
 
 
 def _polarity(norm_text: str) -> Optional[str]:

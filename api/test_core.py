@@ -558,6 +558,33 @@ def test_fetchable_resolves_every_address():
         core.socket.getaddrinfo = real
 
 
+def test_company_key():
+    for n in ("Acme Ltd", "ACME Limited", "acme plc", "Acme Group", "Acme LLP"):
+        assert core.company_key(n) == "acme", n
+    assert core.company_key("Marks & Spencer plc") == core.company_key("Marks and Spencer") == "marks spencer"
+    assert core.company_key("") == "" and core.company_key(None) == ""
+    assert core.company_key("The Group") == "the group"
+
+
+def test_reed_match_rules():
+    def r(title, company="Acme Limited", loc="London"):
+        return {"jobId": 1, "jobTitle": title, "employerName": company, "locationName": loc}
+
+    def match(title, results, company="Acme Ltd", loc="Leeds"):
+        return core.reed_match({"title": title, "company": company, "location": loc}, results)
+
+    a = r("Data Analysts")
+    assert match("Data Analyst", [a]) is a  # ratio >= 0.9, location never required
+    assert match("Data Analyst", [r("Data Analyst", "Other Co")]) is None
+    assert match("Software Engineer", [r("Software Engineer II")]) is None  # ratio 0.919 but a level word on one side
+    assert match("Data Analyst", [r("Senior Data Analyst")]) is None
+    assert match("Data Analyst", [r("Data Analyst")], company="") is None
+    assert match("Senior Data Analyst", [r("Senior Data Analyst")]) is not None  # level on both sides is fine
+    far, near = r("Data Analyst", loc="Leeds, West Yorkshire"), r("Data Analysts", loc="Leeds")
+    assert match("Data Analyst", [near, far], loc="Leeds, West Yorkshire") is far  # location beats a higher ratio
+    assert match("Data Analyst", [near, r("Data Analyst", loc="Bath")], loc="Manchester")["locationName"] == "Bath"  # ratio wins
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

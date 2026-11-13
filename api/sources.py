@@ -17,6 +17,8 @@ import core
 
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
 REED_URL = "https://www.reed.co.uk/api/1.0/search"
+REED_JOB_URL = "https://www.reed.co.uk/api/1.0/jobs/%d"
+REED_LOOKUP_RESULTS = 100  # Reed's resultsToTake maximum
 PAGE_SIZE = 50  # first page only
 USER_AGENT = "JobHelper/1.0 (local job search app)"
 REMOTIVE_GAP_SECONDS = 31
@@ -85,9 +87,13 @@ def _salary_text(lo, hi) -> str:
     return "£{:,.0f}".format(lo or hi)
 
 
-def fetch_reed(fields: List[str], api_key: str, location: str = "", min_salary: int = 0) -> List[dict]:
+def _reed_auth(api_key: str) -> dict:
     # Basic auth: key as username, EMPTY password (the colon is required)
-    auth = {"Authorization": "Basic " + base64.b64encode((api_key + ":").encode()).decode()}
+    return {"Authorization": "Basic " + base64.b64encode((api_key + ":").encode()).decode()}
+
+
+def fetch_reed(fields: List[str], api_key: str, location: str = "", min_salary: int = 0) -> List[dict]:
+    auth = _reed_auth(api_key)
     found = {}  # type: Dict[str, dict]
     try:
         for field in fields:
@@ -113,6 +119,36 @@ def fetch_reed(fields: List[str], api_key: str, location: str = "", min_salary: 
         raise SourceError("Reed fetch failed: %s" % e)
     # ponytail: the same ad on two sources is not merged; dedupe is by URL only
     return list(found.values())
+
+
+def reed_lookup(job: dict, api_key: str) -> Optional[dict]:
+    """The Reed ad that is this LinkedIn/Indeed alert job: {"text", "salary", "job_type"} or None (D-01, D-04).
+    At most two searches and one details request; only ever the Reed API, never the alert site (D-18)."""
+    if not core.company_key(job.get("company")) or not core.normalise(job.get("title") or ""):
+        return None
+    auth = _reed_auth(api_key)
+    title, company = job["title"], job["company"]
+    try:
+        best = None
+        for keywords in ("%s %s" % (title, company), title):
+            results = get_json(REED_URL, {"keywords": keywords, "resultsToTake": REED_LOOKUP_RESULTS}, headers=auth)["results"]
+            best = core.reed_match(job, results)
+            if best:
+                break
+        if not best:
+            return None
+        d = get_json(REED_JOB_URL % int(best["jobId"]), {}, headers=auth)  # int(): an API value never enters the path as text
+        text = core.plain_text(html.unescape(d.get("jobDescription") or ""))
+        if not text:
+            return None
+        if d.get("partTime") is True and d.get("fullTime") is not True:
+            job_type = "Part-time"
+        else:
+            job_type = core._first_label(core.normalise("%s %s" % (d.get("jobType") or "", d.get("contractType") or "")), core._TYPES)
+        return {"text": text, "salary": _salary_text(d.get("minimumSalary"), d.get("maximumSalary")), "job_type": job_type}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        # message from the exception only: never params/headers/url (they carry the key)
+        raise SourceError("Reed lookup failed: %s" % e)
 
 
 # --- full job description from the posting page (DETAIL-01, D-16) -------------

@@ -1,8 +1,10 @@
+import base64
 import collections
 import contextlib
 import html
 import http.client
 import http.server
+import itertools
 import json
 import logging
 import os
@@ -25,6 +27,7 @@ import sources  # noqa: E402
 import watcher  # noqa: E402
 
 REAL_GET_PAGE = sources.get_page
+REAL_GET_JSON = sources.get_json
 REAL_FETCH_PAGE = browser.fetch_page
 REAL_START = browser._start_playwright
 
@@ -96,6 +99,7 @@ def fresh():
     os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
     db.init_db()
     sources.get_page = REAL_GET_PAGE
+    sources.get_json = REAL_GET_JSON
     browser.fetch_page = no_browser
     COUNTS.clear()
     core.ALLOW_PRIVATE_HOSTS = True
@@ -327,9 +331,11 @@ def test_details_plan_rules():
         return core.details_plan(dict({"url": "https://www.reed.co.uk/jobs/1", "source": "reed", "title": "Nurse",
                                        "description": "analyse data"}, **kw), s)
 
-    assert plan(source="linkedin") == "skipped" and plan(source="indeed") == "skipped"
-    assert plan(url="https://uk.indeed.com/viewjob?jk=1") == "skipped"
-    assert plan(url="https://www.linkedin.com/jobs/view/1") == "skipped"
+    assert plan(source="linkedin") == "lookup" and plan(source="indeed") == "lookup"
+    assert plan(url="https://uk.indeed.com/viewjob?jk=1") == "lookup"
+    assert plan(url="https://www.linkedin.com/jobs/view/1") == "lookup"
+    assert plan(source="linkedin", title="Senior Nurse") == "skipped"  # excluded word first
+    assert plan(source="linkedin", description="l" * 600) == "ok"
     assert plan(url="https://notindeed.com/x") == "fetch"
     assert plan(title="Senior Nurse") == "skipped"
     assert plan(source="remotive", description="r" * 600) == "ok"
@@ -340,18 +346,196 @@ def test_details_plan_rules():
 def test_linkedin_indeed_never_fetched():
     fresh()
     seen = []
+
+    def no_reed(*a, **k):
+        raise AssertionError("no Reed request without a key")
+
     sources.get_page = lambda url: seen.append(url) or (200, "x")
     try:
-        ids = [job("https://www.linkedin.com/jobs/view/1", source="linkedin", description="seen in alert"),
-               job("https://uk.indeed.com/viewjob?jk=1", source="indeed", description="seen in alert")]
-        assert watcher._details_step() is False and watcher._details_step() is False
-        assert watcher._details_step() is None
+        with patched(sources, "get_json", no_reed):
+            ids = [job("https://www.linkedin.com/jobs/view/1", source="linkedin", description="seen in alert"),
+                   job("https://uk.indeed.com/viewjob?jk=1", source="indeed", description="seen in alert")]
+            assert watcher._details_step() is False and watcher._details_step() is False
+            assert watcher._details_step() is None
     finally:
         sources.get_page = REAL_GET_PAGE
     assert seen == []
     for i in ids:
         got = get(i)
-        assert got["details_status"] == "skipped" and got["description"] == "seen in alert"
+        assert got["details_status"] == "blocked" and got["description"] == "seen in alert"
+
+
+def reed_fake(results, details, calls):
+    def fake(url, params, headers=None):
+        calls.append((url, params, headers))
+        if url.endswith("/search"):
+            return {"results": results}
+        if "/api/1.0/jobs/" in url:
+            return details
+        raise AssertionError(url)
+    return fake
+
+
+def set_key(key="k"):
+    with contextlib.closing(db.connect()) as conn:
+        db.save_settings(conn, {"reed_api_key": key})
+
+
+REED_HIT = {"jobId": 7, "jobUrl": "https://www.reed.co.uk/jobs/data-analyst/7", "jobTitle": "Data Analyst",
+            "employerName": "ACME Limited", "locationName": "London", "jobDescription": "short preview"}
+
+
+def test_reed_lookup_end_to_end():
+    fresh()
+    set_key()
+    job_id = job("https://www.linkedin.com/jobs/view/42", source="linkedin", title="Data Analyst", company="Acme Ltd",
+                 description="seen in alert")
+    details = {"jobId": 7, "jobDescription": "<p>Full ad text.</p><p>" + "You will analyse data every day. " * 30 + "</p>",
+               "minimumSalary": 40000, "maximumSalary": 50000, "contractType": "Permanent"}
+    calls, seen = [], []
+    assert "Salary not listed" in get(job_id)["cons"]
+    sources.get_page = lambda url: seen.append(url) or (200, "x")
+    sources.get_json = reed_fake([REED_HIT], details, calls)
+    try:
+        assert watcher._details_step() is True
+    finally:
+        sources.get_page = REAL_GET_PAGE
+    got = app.app.test_client().get("/api/jobs").get_json()[0]
+    assert got["details_status"] == "reed"
+    assert got["description"].startswith("Full ad text.") and "<" not in got["description"]
+    assert got["url"] == "https://www.linkedin.com/jobs/view/42"
+    assert got["salary"] == "£40,000 - £50,000"
+    assert got["summary"]["salary_annual"] == 45000 and got["summary"]["job_type"] == "Full-time"
+    assert "Salary not listed" not in got["cons"]
+    assert [c[0] for c in calls] == [sources.REED_URL, sources.REED_JOB_URL % 7]
+    assert calls[0][1]["keywords"] == "Data Analyst Acme Ltd" and "Authorization" in calls[0][2]
+    assert not any("linkedin.com" in c[0] or "indeed.com" in c[0] for c in calls) and seen == []
+    with contextlib.closing(db.connect()) as conn:
+        assert "jobs/data-analyst/7" not in json.dumps(dict(conn.execute("SELECT * FROM jobs").fetchone()))
+    assert watcher._details_step() is None
+
+
+def reed_job(url="https://www.linkedin.com/jobs/view/%d", **extra):
+    return job(url % next(_reed_ids), source="linkedin", **dict({"company": "Acme Ltd", "description": "seen in alert"}, **extra))
+
+
+_reed_ids = itertools.count(1)
+
+
+def no_network(*a, **k):
+    raise AssertionError("unexpected request")
+
+
+def test_lookup_without_key_no_network():
+    fresh()
+    job_id = reed_job()
+    sources.get_json = no_network
+    assert watcher._details_step() is False
+    assert get(job_id)["details_status"] == "blocked"
+    assert watcher._details_step() is None
+
+
+def test_lookup_no_match_blocked_once():
+    fresh()
+    set_key()
+    job_id = reed_job(title="Data Analyst", company="Acme")
+    calls = []
+    sources.get_json = reed_fake([dict(REED_HIT, employerName="Other Co")], {}, calls)
+    assert watcher._details_step() is True
+    assert get(job_id)["details_status"] == "blocked"
+    assert [c[1]["keywords"] for c in calls] == ["Data Analyst Acme", "Data Analyst"]
+    assert all(c[0] == sources.REED_URL and "linkedin" not in str(c[1]) for c in calls)
+    assert watcher._details_step() is None
+    db.init_db()
+    assert get(job_id)["details_status"] == "blocked"
+
+
+def test_lookup_source_error_blocked():
+    fresh()
+    set_key("secret-key-123")
+    job_id = reed_job()
+
+    def too_many(url, params, headers=None):
+        raise OSError("HTTP Error 429: Too Many Requests")
+
+    sources.get_json = too_many
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    watcher.log.addHandler(handler)
+    try:
+        assert watcher._details_step() is True
+    finally:
+        watcher.log.removeHandler(handler)
+    assert get(job_id)["details_status"] == "blocked"
+    assert len(records) == 1 and records[0].levelno == logging.WARNING and records[0].exc_info is None
+    msg = records[0].getMessage()
+    assert "429" in msg and "secret-key-123" not in msg and base64.b64encode(b"secret-key-123:").decode() not in msg
+    assert watcher._details_step() is None
+
+
+def test_startup_repends_linkedin_indeed_skips():
+    fresh()
+    ids = [reed_job(), job("https://uk.indeed.com/viewjob?jk=9", source="indeed", description="seen in alert"),
+           job("https://www.reed.co.uk/jobs/9")]
+    with contextlib.closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE jobs SET details_status = 'skipped'")
+    db.init_db()
+    assert [get(i)["details_status"] for i in ids] == ["pending", "pending", "skipped"]
+    db.init_db()
+    assert [get(i)["details_status"] for i in ids] == ["pending", "pending", "skipped"]
+    with contextlib.closing(db.connect()) as conn:
+        db.save_settings(conn, {"excluded_words": ["analyst"]})
+    sources.get_json = no_network
+    while watcher._details_step() is not None:
+        pass
+    assert [get(i)["details_status"] for i in ids[:2]] == ["skipped", "skipped"]
+
+
+def test_reed_pro_derived():
+    fresh()
+    job_id = reed_job()
+    with contextlib.closing(db.connect()) as conn:
+        db.save_reed_match(conn, job_id, "Reed text. " * 60)
+    assert "Description from Reed" in get(job_id)["pros"]
+    with contextlib.closing(db.connect()) as conn:
+        db.save_settings(conn, {"min_salary": 30000})  # a settings save re-scores every new job
+        db.rescore_new(conn, db.get_settings(conn))
+    got = get(job_id)
+    assert "Description from Reed" in got["pros"] and got["pros"].count("Description from Reed") == 1
+
+
+def test_reed_match_copy_rules():
+    fresh()
+    with_salary = reed_job(salary="£30,000")
+    without = reed_job()
+    queued = reed_job()
+    with contextlib.closing(db.connect()) as conn:
+        db.set_status(conn, queued, "queue")
+        before = get(queued)
+        for i in (with_salary, without, queued):
+            db.save_reed_match(conn, i, "Full text. " * 60, "£40,000 - £50,000", "Contract")
+    assert get(with_salary)["salary"] == "£30,000" and get(without)["salary"] == "£40,000 - £50,000"
+    assert get(without)["summary"]["job_type"] == "Contract"
+    got = get(queued)
+    assert got["description"] == "Full text. " * 60 and got["details_status"] == "reed"
+    for k in ("score", "pros", "cons", "summary"):
+        assert got[k] == before[k], k  # D-13: a queued job keeps its score
+    assert got["url"] == before["url"]
+
+
+def test_reed_lookup_job_type():
+    fresh()
+    j = {"title": "Data Analyst", "company": "Acme Ltd", "location": "London"}
+    body = "<p>" + "Text. " * 100 + "</p>"
+    for extra, want in (({"jobType": "Contract"}, "Contract"),
+                        ({"partTime": True, "fullTime": False, "contractType": "Permanent"}, "Part-time"),
+                        ({"contractType": "Permanent"}, "Full-time")):
+        sources.get_json = reed_fake([REED_HIT], dict(extra, jobDescription=body), [])
+        assert sources.reed_lookup(j, "k")["job_type"] == want, extra
+    sources.get_json = reed_fake([REED_HIT], {"jobDescription": ""}, [])
+    assert sources.reed_lookup(j, "k") is None  # an empty description is no match
+    sources.get_json = REAL_GET_JSON
 
 
 LONG_TEXT = ("Responsibilities\n• Write weekly reports\n• Plan the team tasks\n• Review incoming data\n"
@@ -415,7 +599,7 @@ def test_blocked_keeps_snippet():
 def test_save_details_rejects_unknown_status():
     fresh()
     job_id = job("https://a.example/u")
-    for status in ("pending", "nope"):
+    for status in ("pending", "reed", "pasted", "nope"):
         raises(ValueError, save, job_id, "", status)
     assert get(job_id)["details_status"] == "pending"
 

@@ -170,12 +170,27 @@ def _details_step() -> Optional[bool]:
         if job is None:
             return None
         try:
-            plan = core.details_plan(job, db.get_settings(conn))
+            settings = db.get_settings(conn)
+            plan = core.details_plan(job, settings)
+            if plan == "lookup":  # LinkedIn/Indeed: only the Reed API is asked, once (D-01, D-02, D-03)
+                key = settings["reed_api_key"]
+                if not key:
+                    db.save_details(conn, job["id"], "", "blocked")
+                    return False
+                found = sources.reed_lookup(job, key)
+                if found:
+                    db.save_reed_match(conn, job["id"], found["text"], found["salary"], found["job_type"])
+                else:
+                    db.save_details(conn, job["id"], "", "blocked")
+                return True
             if plan != "fetch":
                 db.save_details(conn, job["id"], "", plan)
                 return False
             text, status = sources.fetch_details(job["url"])
             db.save_details(conn, job["id"], text, status)
+        except sources.SourceError as e:  # a failed Reed lookup is final (D-03); message only, it never holds the key
+            log.warning("%s (job %s)", e, job["id"])
+            db.save_details(conn, job["id"], "", "blocked")
         except Exception:  # a bad row is marked blocked so the loop can never spin on it; SystemExit leaves it pending
             log.exception("Details fetch failed for job %s", job["id"])
             db.save_details(conn, job["id"], "", "blocked")
