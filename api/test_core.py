@@ -141,7 +141,7 @@ def sc(j, **overrides):
 def test_score_salary_above_min():
     n, pros, cons = sc(job(salary="£45,000"))
     assert n == 80
-    assert pros == ["Pays £45k, above your £40k minimum"] and cons == []
+    assert pros == ["Pays £45k, above your £40k minimum"] and cons == [core.PARTIAL_CON]
 
 
 def test_score_salary_meets_min():
@@ -153,12 +153,12 @@ def test_score_salary_meets_min():
 def test_score_title_match_and_salary_not_listed():
     n, pros, cons = sc(job(title="Senior Data Analyst"))
     assert n == 65
-    assert pros == ["Title matches your field 'Data Analyst'"] and cons == ["Salary not listed"]
+    assert pros == ["Title matches your field 'Data Analyst'"] and cons == ["Salary not listed", core.PARTIAL_CON]
 
 
 def test_score_neutral_is_base():
     n, pros, cons = sc(job())
-    assert n == 50 and pros == [] and cons == ["Salary not listed"]
+    assert n == 50 and pros == [] and cons == ["Salary not listed", core.PARTIAL_CON]
 
 
 def test_score_ordering():
@@ -174,19 +174,19 @@ def test_score_below_min_is_scaled():
     n38, _, cons38 = sc(job(salary="£38,000"))
     n15, _, cons15 = sc(job(salary="£15,000"))
     assert n15 < n38 < 50
-    assert cons38 == ["Pays £38k, below your £40k minimum"]
-    assert cons15 == ["Pays £15k, below your £40k minimum"]
+    assert cons38 == ["Pays £38k, below your £40k minimum", core.PARTIAL_CON]
+    assert cons15 == ["Pays £15k, below your £40k minimum", core.PARTIAL_CON]
 
 
 def test_score_other_currency_not_compared():
     n, pros, cons = sc(job(salary="USD 80000"))
     assert n == 50 and pros == []
-    assert cons == ["Pays USD 80000, can't compare with your £40k minimum (not in £)"]
+    assert cons == ["Pays USD 80000, can't compare with your £40k minimum (not in £)", core.PARTIAL_CON]
 
 
 def test_score_min_salary_zero_ignores_salary():
     n, pros, cons = sc(job(salary="£45,000"), min_salary=0)
-    assert n == 50 and pros == [] and cons == []
+    assert n == 50 and pros == [] and cons == [core.PARTIAL_CON]
 
 
 def test_score_remote_points():
@@ -256,10 +256,38 @@ def test_score_salary_dominates_skills():
 
 
 def test_score_no_skills_no_effect():
-    j = job(title="Data Analyst", salary="£45,000")
+    j = job(title="Data Analyst", salary="£45,000", description="Reporting work every day. " * 25)
     want = core.score(j, SETTINGS, None)
     for profile in ({}, {"skills": []}, {"skills": ["Rust"]}):
         assert core.score(j, SETTINGS, profile) == want
+
+
+def test_is_partial_rules():
+    p = core.is_partial
+    assert p(job(description="a" * 499)) and not p(job(description="a" * 500))
+    assert p(job(description="<p>" + "a" * 499 + "</p>"))
+    for st in ("reed", "pasted"):
+        assert not p(job(description="short", details_status=st))
+    for st in ("blocked", "pending", "ok"):
+        assert p(job(description="short", details_status=st))
+    assert p(job(description="short", source="remotive"))
+
+
+def test_partial_skills_credit():
+    snippet = "Excel, SQL, Python and Tableau daily"
+    def delta(j, skills):
+        return core.score(j, SETTINGS, {"skills": skills})[0] - core.score(j, SETTINGS, None)[0]
+    j = job(description=snippet)
+    assert delta(j, ["Rust"]) == 5 and not any("Matches" in p for p in core.score(j, SETTINGS, {"skills": ["Rust"]})[1])
+    assert delta(j, ["Excel", "SQL", "Python", "Tableau"]) == 8
+    assert delta(job(description="Excel SQL Python Tableau Go R"), ["Excel", "SQL", "Python", "Tableau", "Go", "R"]) == 10
+    assert delta(job(description="x" * 600), ["Rust"]) == 0
+    for st in ("reed", "pasted"):
+        done = job(description=snippet, details_status=st)
+        assert delta(done, ["Rust"]) == 0 and core.PARTIAL_CON not in core.score(done, SETTINGS)[2]
+    assert core.score(j, SETTINGS, {}) == core.score(j, SETTINGS, {"skills": []}) == core.score(j, SETTINGS)
+    n, _, cons = core.score(j, SETTINGS)
+    assert cons == ["Salary not listed", core.PARTIAL_CON] and n == 50  # D-11: no salary penalty
 
 
 def test_score_skill_terms_exact():

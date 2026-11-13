@@ -140,6 +140,7 @@ def job_dict(row) -> dict:
     d = dict(row)
     for key in ("summary", "pros", "cons"):
         d[key] = json.loads(d[key])
+    d["summary"]["partial_info"] = core.is_partial(d)  # computed on read, never stored (D-12)
     return d
 
 

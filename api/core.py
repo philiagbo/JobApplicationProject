@@ -257,6 +257,14 @@ HYBRID_POINTS = 5
 EXCLUDED_POINTS = 25
 SKILL_POINTS_EACH = 2
 SKILL_POINTS_CAP = 10  # below TITLE_POINTS, so salary stays the heaviest rule
+PARTIAL_CON = "Only the alert snippet — paste the description for a full score"
+
+
+def is_partial(job: dict) -> bool:
+    """D-09: short description that was not filled from Reed or pasted, for any source."""
+    if job.get("details_status") in ("reed", "pasted"):
+        return False
+    return len(plain_text(job.get("description") or "")) < SHORT_DESCRIPTION_CHARS
 
 
 def k(n: float) -> str:
@@ -299,9 +307,14 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
         total += HYBRID_POINTS
         pros.append("Hybrid working")
 
-    hits = matched_skills((profile or {}).get("skills") or [], job)
+    partial = is_partial(job)
+    profile_skills = (profile or {}).get("skills") or []
+    hits = matched_skills(profile_skills, job)
+    pts = min(SKILL_POINTS_EACH * len(hits), SKILL_POINTS_CAP)
+    if partial and profile_skills:  # D-10 neutral credit; only when the profile has a skill (D-10a)
+        pts = max(pts, SKILL_POINTS_CAP // 2)
+    total += pts
     if hits:
-        total += min(SKILL_POINTS_EACH * len(hits), SKILL_POINTS_CAP)
         pros.append("Matches %d of your skills: %s%s" % (len(hits), ", ".join(hits[:3]), "…" if len(hits) > 3 else ""))
 
     # Excluded words cost points but never hide the job (D-04); one penalty however many hit.
@@ -314,6 +327,8 @@ def score(job: dict, settings: dict, profile: Optional[dict] = None) -> Tuple[in
 
     if job.get("details_status") == "reed":  # derived from the stored status: rescore_new rebuilds pros from scratch
         pros.append("Description from Reed")
+    if partial:
+        cons.append(PARTIAL_CON)
 
     return max(0, min(100, int(total))), pros, cons
 

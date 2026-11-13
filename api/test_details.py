@@ -519,8 +519,9 @@ def test_reed_match_copy_rules():
     assert get(without)["summary"]["job_type"] == "Contract"
     got = get(queued)
     assert got["description"] == "Full text. " * 60 and got["details_status"] == "reed"
-    for k in ("score", "pros", "cons", "summary"):
+    for k in ("score", "pros", "cons"):
         assert got[k] == before[k], k  # D-13: a queued job keeps its score
+    assert dict(got["summary"], partial_info=0) == dict(before["summary"], partial_info=0)  # the flag is computed on read
     assert got["url"] == before["url"]
 
 

@@ -14,6 +14,7 @@ os.environ["JOBHELPER_DB"] = os.path.join(tempfile.mkdtemp(), "boot.db")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import app  # noqa: E402
+import core  # noqa: E402
 import db  # noqa: E402
 import sources  # noqa: E402
 import watcher  # noqa: E402
@@ -35,7 +36,7 @@ class CheckedClient(FlaskClient):
 app.app.test_client_class = CheckedClient
 
 SUMMARY_KEYS = {"salary_text", "salary_annual", "currency", "job_type", "remote",
-                "years_experience", "what_youd_do", "what_they_want"}
+                "years_experience", "what_youd_do", "what_they_want", "partial_info"}
 
 
 def item(slug, title, description="", job_type="full_time", salary=""):
@@ -831,7 +832,8 @@ def test_cover_letter_nothing_stored():
 
 def test_profile_change_rescores_new_only():
     c = fresh_client()
-    fresh, queued = add_job("rs-1", "Analyst", "We use SQL"), add_job("rs-2", "Analyst", "We use SQL")
+    full = "We use SQL. " + "Reporting work every day. " * 25
+    fresh, queued = add_job("rs-1", "Analyst", full), add_job("rs-2", "Analyst", full)
     c.post("/api/jobs/%d/queue" % queued)
     old_new, old_queued = job_by_id(c, fresh), job_by_id(c, queued, "queued")
     c.put("/api/profile", json={"skills": ["SQL"]})
@@ -839,6 +841,24 @@ def test_profile_change_rescores_new_only():
     assert new_new["score"] == old_new["score"] + 2
     assert new_new["pros"] == old_new["pros"] + ["Matches 1 of your skills: SQL"]
     assert (new_queued["score"], new_queued["pros"]) == (old_queued["score"], old_queued["pros"])
+
+
+def test_partial_info_end_to_end():
+    c = fresh_client()
+    a = add_job("pi-1", "Analyst", "Short alert snippet")
+    j = job_by_id(c, a)
+    assert j["summary"]["partial_info"] is True and core.PARTIAL_CON in j["cons"] and "Salary not listed" in j["cons"]
+    text = "Reporting work every day. " * 24
+    with contextlib.closing(db.connect()) as conn:
+        db.save_reed_match(conn, a, text, "", None)
+    j = job_by_id(c, a)
+    assert j["summary"]["partial_info"] is False and core.PARTIAL_CON not in j["cons"] and "Description from Reed" in j["pros"]
+    b = add_job("pi-2", "Analyst", "Short alert snippet")
+    c.post("/api/jobs/%d/queue" % b)
+    with contextlib.closing(db.connect()) as conn:
+        db.save_reed_match(conn, b, text, "", None)
+    j = job_by_id(c, b, "queued")  # D-13 freeze: stored cons stay, the flag is computed on read
+    assert j["summary"]["partial_info"] is False and core.PARTIAL_CON in j["cons"]
 
 
 def test_cv_upload_rescores():
